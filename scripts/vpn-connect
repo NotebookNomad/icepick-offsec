@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Container-side of `deck vpn`: bring the tunnel up, then hand off to a login
+# shell in this same container so tun0 and your shell share one network
+# namespace. $OVPN is the config filename deck staged into ~/workspace.
+set -euo pipefail
+
+cfg="$HOME/workspace/${OVPN:?deck vpn sets this}"
+# `|| true` so a config openvpn rejects (missing CA, etc.) doesn't abort under
+# set -e - we still want to reach the fallback below and drop into a shell.
+openvpn --config "$cfg" --daemon --log /tmp/openvpn.log || true
+
+# Wait for the handshake so we can report the tun0 IP; bail after 20s either way.
+for _ in $(seq 1 20); do
+  grep -q "Initialization Sequence Completed" /tmp/openvpn.log 2>/dev/null && break
+  sleep 1
+done
+
+tun=$(ip -o -4 addr show tun0 2>/dev/null)
+if [ -n "$tun" ]; then
+  echo "VPN up: $(awk '{print $4}' <<<"$tun")   (log: /tmp/openvpn.log)"
+else
+  echo "tun0 not up yet - tail /tmp/openvpn.log. auth-user-pass configs need a"
+  echo "manual connect: openvpn --config $cfg"
+fi
+
+exec zsh -l

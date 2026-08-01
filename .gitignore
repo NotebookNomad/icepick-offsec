@@ -1,0 +1,12 @@
+# Engagement data - never commit this. workspace/ accumulates loot, notes,
+# scope files, target lists and CTF binaries. deck recreates the dir on demand,
+# so only the placeholder is tracked.
+workspace/*
+!workspace/.gitkeep
+
+# Local tooling state and credentials.
+.claude/
+.env
+*.ovpn
+*.pem
+*.key

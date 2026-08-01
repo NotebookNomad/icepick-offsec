@@ -1,0 +1,49 @@
+# Runs as root with Docker's default capability set, like every Kali image.
+# Isolation here is: no host filesystem beyond ./workspace, no docker socket,
+# own network, resource caps. Dropping capabilities breaks nmap and root's own
+# volume writes - see the README before trying it.
+
+services:
+  deck:
+    build: .
+    image: icepick-offsec:latest
+    hostname: deck
+    init: true
+    stdin_open: true
+    tty: true
+    security_opt: [no-new-privileges:true]
+    # A runaway ffuf should not take the laptop down.
+    pids_limit: 512
+    mem_limit: 6g
+    cpus: 4
+    # REQUIRED - do not remove. Three things need it:
+    #  1. nmap. Kali's binary carries cap_net_admin as a *file* capability, and
+    #     the kernel refuses to exec a binary whose file caps exceed the
+    #     container's bounding set. Without NET_ADMIN every nmap run - including
+    #     a plain -sT, as root - fails with "Operation not permitted" before
+    #     main(), which looks nothing like a capability problem.
+    #  2. lockdown-lan, to write iptables rules.
+    #  3. openvpn, to configure the tun device for HTB / THM.
+    cap_add: [NET_ADMIN]
+    devices: ["/dev/net/tun:/dev/net/tun"]
+    volumes:
+      - ./workspace:/root/workspace
+      - wordlists:/root/wordlists
+      # Three of these are caches that re-download on `run --rm` without a volume
+      # (nuclei alone keeps an 83 MB template set in ~/.local). toolconfig is the
+      # exception: ~/.config holds the API keys you paste into
+      # subfinder/uncover provider-config.yaml - not regenerable, and wiped by
+      # `deck clean --volumes`. Back it up before wiping:
+      #   docker run --rm -v icepick-offsec_toolconfig:/c -v "$PWD":/out alpine \
+      #     tar czf /out/config-backup.tgz -C /c .
+      - toolconfig:/root/.config
+      - toollocal:/root/.local
+      - toolcache:/root/.cache
+    environment:
+      TERM: xterm-256color
+
+volumes:
+  wordlists:
+  toolconfig:
+  toollocal:
+  toolcache:

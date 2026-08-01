@@ -1,0 +1,9 @@
+# Never let engagement data or loot into the build context.
+workspace/
+.claude/
+.env
+*.ovpn
+*.pem
+*.key
+.git/
+README.md

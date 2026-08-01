@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Block egress to your LAN (RFC1918 + link-local + CGNAT) while leaving the
+# public internet up - so a typo'd `-iL targets.txt` or an inward-resolving SSRF
+# can't reach your router or NAS. Needs NET_ADMIN; rules are per container.
+set -euo pipefail
+
+# Decode CapEff from /proc, not `capsh --print`: its "Current IAB" line prints
+# !cap_net_admin when absent, and a plain grep matches that negated entry.
+eff=$(capsh --decode="$(awk '/^CapEff/{print $2}' /proc/self/status)" 2>/dev/null)
+if ! printf '%s' "$eff" | grep -q net_admin; then
+  echo "error: needs NET_ADMIN - check cap_add in docker-compose.yml." >&2
+  exit 1
+fi
+
+PRIVATE_RANGES=(
+  10.0.0.0/8
+  172.16.0.0/12
+  192.168.0.0/16
+  169.254.0.0/16
+  100.64.0.0/10
+)
+
+# Permit the container's own subnet + gateway first (both sit inside the ranges
+# below), or we'd sever our own route and DNS. First match wins in iptables.
+OWN_SUBNET="$(ip -o -f inet addr show scope global | awk '{print $4}' | head -1)"
+GATEWAY="$(ip route | awk '/^default/{print $3}' | head -1)"
+
+echo ">> permitting own subnet $OWN_SUBNET and gateway $GATEWAY"
+[ -n "$GATEWAY" ]    && iptables -A OUTPUT -d "$GATEWAY"    -j ACCEPT
+[ -n "$OWN_SUBNET" ] && iptables -A OUTPUT -d "$OWN_SUBNET" -j ACCEPT
+
+for range in "${PRIVATE_RANGES[@]}"; do
+  echo ">> blocking $range"
+  iptables -A OUTPUT -d "$range" -j REJECT --reject-with icmp-admin-prohibited
+done
+
+echo
+echo "LAN egress blocked. Public internet still reachable."
+echo "Verify:  curl -m 3 https://example.com   (should work)"
+echo "         curl -m 3 http://192.168.1.1    (should be rejected)"

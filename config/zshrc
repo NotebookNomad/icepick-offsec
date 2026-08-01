@@ -1,0 +1,122 @@
+# Toolkit shell. Kept small on purpose - no framework, no plugin manager.
+
+# Debian's /etc/zsh/zprofile does `emulate sh -c '. /etc/profile'` on every
+# login shell, and /etc/profile hardcodes its own PATH - silently discarding
+# the Dockerfile's ENV PATH, /root/.local/bin included. Restore it here, since
+# .zshrc is the first thing that runs after that clobber.
+export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+autoload -Uz compinit && compinit -u
+autoload -Uz colors && colors
+
+HISTFILE=~/workspace/.zsh_history   # on the volume, so it survives rebuilds
+HISTSIZE=50000
+SAVEHIST=50000
+setopt HIST_IGNORE_DUPS SHARE_HISTORY EXTENDED_HISTORY INC_APPEND_HISTORY
+setopt AUTO_CD INTERACTIVE_COMMENTS
+
+PROMPT="%B[%F{green}deck%f] %F{blue}%~%f %(?..%F{red}%? )%f%# %b"
+
+# Debian renames these; restore the names everyone's muscle memory expects.
+alias fd='fdfind'
+alias bat='batcat'
+alias ll='ls -alh --color=auto'
+alias ls='ls --color=auto'
+alias ports='ss -tulpn'
+
+export WORDLISTS="$HOME/wordlists"
+alias sl="cd $WORDLISTS/SecLists"
+
+# nuclei/subfinder etc. write here; it's a named volume so templates and API
+# keys persist across rebuilds.
+export XDG_CONFIG_HOME="$HOME/.config"
+
+# Scope guard: bug bounty programs have boundaries, and a typo'd flag is the
+# usual way people cross one. Drop in-scope hosts in workspace/scope.txt.
+inscope() {
+  if [ ! -f "$HOME/workspace/scope.txt" ]; then
+    echo "no scope.txt in workspace - create one, first line per host" >&2
+    return 1
+  fi
+  grep -vE '^\s*(#|$)' "$HOME/workspace/scope.txt"
+}
+
+# --- Burp on the host -------------------------------------------------------
+# Burp runs natively on macOS and this container proxies into it. In Burp add a
+# proxy listener bound to "All interfaces" (Proxy > Proxy settings) - the
+# default 127.0.0.1 listener is not reachable from a container.
+BURP_HOST="${BURP_HOST:-host.docker.internal}"
+BURP_PORT="${BURP_PORT:-8080}"
+BURP_PROXY="http://${BURP_HOST}:${BURP_PORT}"
+BURP_CA="$HOME/workspace/.burp-ca.der"
+
+# Trust Burp's CA so TLS through the proxy verifies instead of erroring. The
+# container is thrown away each session, so this re-runs at every shell start;
+# the .der itself lives in workspace/ and persists.
+_burp_trust() {
+  local crt=/usr/local/share/ca-certificates/burp.crt
+  [ -f "$BURP_CA" ] || return 1
+  # Already installed and current? Skip the ~100ms update-ca-certificates rehash
+  # that would otherwise re-run in every shell (every tmux pane) of a container.
+  [ "$crt" -nt "$BURP_CA" ] && return 0
+  openssl x509 -inform DER -in "$BURP_CA" -out "$crt" 2>/dev/null \
+    && update-ca-certificates >/dev/null 2>&1
+}
+
+burp() {
+  case "${1:-status}" in
+    on)
+      export http_proxy="$BURP_PROXY" https_proxy="$BURP_PROXY"
+      export HTTP_PROXY="$BURP_PROXY" HTTPS_PROXY="$BURP_PROXY"
+      export no_proxy="localhost,127.0.0.1"
+      echo "proxy on -> $BURP_PROXY"
+      [ -f "$BURP_CA" ] || echo "  no CA trusted yet - start Burp, then run 'burp cert'"
+      ;;
+    off)
+      unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY no_proxy
+      echo "proxy off"
+      ;;
+    cert)
+      # Burp serves its CA at http://burp/cert for requests made through it.
+      # Long timeout on purpose: with intercept on, this request sits in the
+      # Proxy tab until you forward it.
+      if curl -fsS --max-time 60 --proxy "$BURP_PROXY" -o "$BURP_CA" http://burp/cert; then
+        _burp_trust && echo "CA trusted (saved to workspace, survives the session)" \
+                    || { echo "fetched but could not install" >&2; return 1; }
+      else
+        echo "cannot reach Burp at $BURP_PROXY" >&2
+        echo "  in Burp: Proxy > Proxy settings > add a listener on All interfaces" >&2
+        return 1
+      fi
+      ;;
+    *)
+      echo "usage: burp on|off|cert"
+      echo "  proxy : $BURP_PROXY"
+      echo "  state : ${http_proxy:-off}"
+      echo "  CA    : $([ -f "$BURP_CA" ] && echo trusted || echo 'not saved')"
+      ;;
+  esac
+}
+
+_burp_trust
+
+# Quick reminder of what this container can and cannot do.
+whereami() {
+  echo "user      : $(id -un) ($(id -u):$(id -g))"
+  # Decode from /proc rather than parsing `capsh --print`: splitting its
+  # "Current:" line on = yields the flags ("ep"), not the capability names.
+  local eff=$(capsh --decode=$(awk '/^CapEff/{print $2}' /proc/self/status) 2>/dev/null | tail -1 | sed 's/.*=//')
+  echo "caps      : ${eff:-none}"
+  echo "egress    : $(curl -fsS --max-time 4 -o /dev/null https://example.com && echo yes || echo no)"
+  echo "workspace : $HOME/workspace (bind-mounted to host)"
+  echo "wordlists : $(du -sh $HOME/wordlists 2>/dev/null | cut -f1 || echo empty)"
+}
+
+cat <<'BANNER'
+  icepick-offsec - bug bounty & CTF toolkit
+  `whereami` - show user, caps, egress
+  `fetch-wordlists` - populate ~/wordlists (run once)
+  `lockdown-lan` - block your LAN, keep the internet
+  `burp on` - route tools through Burp running on the host
+  only ~/workspace is shared with the host. everything else dies with the container.
+BANNER
