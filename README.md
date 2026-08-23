@@ -89,7 +89,9 @@ hosts add 10.10.115.42 blog.thm admin.blog.thm
 Then browse `http://blog.thm`. Type the `http://`, or Firefox treats a bare
 `.thm` name as a search. Entries are saved in `workspace/hosts.thm` and
 re-applied every time you open a shell, since the container itself is thrown
-away each session.
+away each session. A room gives you a different IP each time you start it, so
+re-running `hosts add` with the same names replaces the old line rather than
+leaving a stale one to win the lookup.
 
 To hunt for vhosts you haven't been given:
 

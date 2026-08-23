@@ -16,7 +16,10 @@ for _ in $(seq 1 20); do
   sleep 1
 done
 
-tun=$(ip -o -4 addr show tun0 2>/dev/null)
+# `|| true` again: ip exits 1 when tun0 is absent, and a bare assignment takes
+# the substitution's status - so under set -e this line, not the openvpn one,
+# is what would kill the fallback it exists to reach.
+tun=$(ip -o -4 addr show tun0 2>/dev/null || true)
 if [ -n "$tun" ]; then
   echo "VPN up: $(awk '{print $4}' <<<"$tun")   (log: /tmp/openvpn.log)"
 else

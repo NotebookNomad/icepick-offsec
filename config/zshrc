@@ -130,8 +130,17 @@ hosts() {
     add)
       shift
       [ $# -ge 2 ] || { echo "usage: hosts add <ip> <name> [name...]" >&2; return 1; }
-      echo "$*" >> "$LAB_HOSTS"
-      _lab_hosts_load && echo "added: $*"
+      local ip="$1"; shift
+      # A lab box gets a new IP every time you start it, so drop any line that
+      # already claims these names instead of appending beside it - the stale
+      # entry sorts first and would quietly win every lookup.
+      if [ -s "$LAB_HOSTS" ]; then
+        awk -v n="$*" 'BEGIN { split(n, a, " "); for (i in a) drop[a[i]] = 1 }
+                       { for (i = 2; i <= NF; i++) if ($i in drop) next; print }' \
+            "$LAB_HOSTS" > "$LAB_HOSTS.new" && mv "$LAB_HOSTS.new" "$LAB_HOSTS"
+      fi
+      echo "$ip $*" >> "$LAB_HOSTS"
+      _lab_hosts_load && echo "added: $ip $*"
       ;;
     load) _lab_hosts_load && echo "applied $LAB_HOSTS" ;;
     *)
