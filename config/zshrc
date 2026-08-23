@@ -100,6 +100,52 @@ burp() {
 
 _burp_trust
 
+# --- lab vhosts -------------------------------------------------------------
+# THM/HTB rooms hand you names (blog.thm), and with `deck vpn --socks` those
+# names resolve on this side of the tunnel - so the /etc/hosts that matters is
+# this container's, not the Mac's. Docker regenerates /etc/hosts per container,
+# so the entries live in workspace/ and get re-applied at every shell start.
+LAB_HOSTS="$HOME/workspace/hosts.thm"
+_LAB_MARK="# --- icepick lab hosts ---"
+
+_lab_hosts_load() {
+  [ -s "$LAB_HOSTS" ] || return 0
+  # Already current? Skip. Every tmux pane runs this, and two panes rewriting
+  # /etc/hosts at once could interleave. An edit to LAB_HOSTS makes it newer
+  # than /etc/hosts again, which is what re-triggers the write.
+  [ /etc/hosts -nt "$LAB_HOSTS" ] && grep -qF "$_LAB_MARK" /etc/hosts && return 0
+
+  # Drop any previous block first, so this replaces rather than accumulates.
+  # index()==1 rather than a regex: the marker is a fixed string, not a pattern.
+  local keep=/tmp/hosts.$$
+  awk -v m="$_LAB_MARK" 'index($0, m) == 1 { exit } { print }' /etc/hosts > "$keep"
+  # Write *through* /etc/hosts - it is a bind mount, so replacing it with mv
+  # fails with "Device or resource busy". Truncate-and-append is the only way.
+  { cat "$keep"; echo "$_LAB_MARK"; cat "$LAB_HOSTS"; } > /etc/hosts
+  rm -f "$keep"
+}
+
+hosts() {
+  case "${1:-show}" in
+    add)
+      shift
+      [ $# -ge 2 ] || { echo "usage: hosts add <ip> <name> [name...]" >&2; return 1; }
+      echo "$*" >> "$LAB_HOSTS"
+      _lab_hosts_load && echo "added: $*"
+      ;;
+    load) _lab_hosts_load && echo "applied $LAB_HOSTS" ;;
+    *)
+      if [ -s "$LAB_HOSTS" ]; then
+        cat "$LAB_HOSTS"
+      else
+        echo "no entries yet - hosts add 10.10.115.42 blog.thm admin.blog.thm"
+      fi
+      ;;
+  esac
+}
+
+_lab_hosts_load
+
 # Quick reminder of what this container can and cannot do.
 whereami() {
   echo "user      : $(id -un) ($(id -u):$(id -g))"
@@ -118,5 +164,6 @@ cat <<'BANNER'
   `fetch-wordlists` - populate ~/wordlists (run once)
   `lockdown-lan` - block your LAN, keep the internet
   `burp on` - route tools through Burp running on the host
+  `hosts add <ip> <name>` - lab vhosts, applied to /etc/hosts each session
   only ~/workspace is shared with the host. everything else dies with the container.
 BANNER

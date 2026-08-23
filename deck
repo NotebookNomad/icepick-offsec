@@ -17,6 +17,7 @@ deck - driver for icepick-offsec, a bug bounty & CTF toolkit
   ./deck shell              interactive shell
   ./deck listen [ports...]  shell with listener ports published to the LAN
   ./deck vpn <file.ovpn>    connect an HTB/THM VPN, then drop into a shell
+        [--socks [port]]    ...and a SOCKS5 proxy on 127.0.0.1:1080 for your browser
   ./deck run <cmd...>       one-shot command, no shell
   ./deck wordlists          populate the shared wordlists volume (once)
   ./deck status             running containers
@@ -67,13 +68,29 @@ case "${1:-}" in
   # tunnel is live in the shell vpn-connect drops you into.
   vpn)
     shift
-    cfg="${1:-}"
-    [ -n "$cfg" ] || { echo "usage: ./deck vpn <file.ovpn>" >&2; exit 1; }
+    cfg="" socks=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        # The port is optional, so only claim the next argument when it is one.
+        --socks) socks=1080
+                 [[ "${2:-}" =~ ^[0-9]+$ ]] && { socks="$2"; shift; } ;;
+        -*)      echo "unknown option: $1" >&2; exit 1 ;;
+        *)       cfg="$1" ;;
+      esac
+      shift
+    done
+    [ -n "$cfg" ] || { echo "usage: ./deck vpn <file.ovpn> [--socks [port]]" >&2; exit 1; }
     [ -f "$cfg" ] || { echo "no such file: $cfg" >&2; exit 1; }
     base="$(basename "$cfg")"
     [ "$cfg" -ef "workspace/$base" ] || cp "$cfg" "workspace/$base"
+
+    # Loopback only. The default `-p 1080:1080` would hand every machine on your
+    # LAN an unauthenticated route onto the lab network.
+    args=(--rm -e OVPN="$base")
+    [ -n "$socks" ] && args+=(-p "127.0.0.1:${socks}:${socks}" -e SOCKS="$socks")
+
     echo "connecting via $base - exit the shell to disconnect"
-    "${DC[@]}" run --rm -e OVPN="$base" deck vpn-connect
+    "${DC[@]}" run "${args[@]}" deck vpn-connect
     ;;
 
   run)

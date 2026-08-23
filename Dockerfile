@@ -57,7 +57,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN apt-get update \
  && apt-get install -y --no-install-recommends kali-linux-headless \
  && apt-get install -y --no-install-recommends \
-        netcat-openbsd iputils-ping dnsutils iptables \
+        netcat-openbsd iputils-ping dnsutils iptables microsocks \
         nuclei httpx-toolkit subfinder naabu dnsx assetfinder arjun \
         gdb gdbserver ltrace strace patchelf checksec python3-pwntools \
         foremost steghide uro name-that-hash \

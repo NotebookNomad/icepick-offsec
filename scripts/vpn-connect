@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Container-side of `deck vpn`: bring the tunnel up, then hand off to a login
 # shell in this same container so tun0 and your shell share one network
-# namespace. $OVPN is the config filename deck staged into ~/workspace.
+# namespace. $OVPN is the config filename deck staged into ~/workspace;
+# $SOCKS, if set, is the port `deck vpn --socks` published on the host.
 set -euo pipefail
 
 cfg="$HOME/workspace/${OVPN:?deck vpn sets this}"
@@ -21,6 +22,22 @@ if [ -n "$tun" ]; then
 else
   echo "tun0 not up yet - tail /tmp/openvpn.log. auth-user-pass configs need a"
   echo "manual connect: openvpn --config $cfg"
+fi
+
+# The host has no route to the VPN, since tun0 lives in this container's netns.
+# A SOCKS5 proxy here is the way a browser on the host reaches the target: every
+# port in one hop, and names resolve on this side, so /etc/hosts vhost entries
+# belong in this container rather than on the host.
+if [ -n "${SOCKS:-}" ]; then
+  # 0.0.0.0, not 127.0.0.1: a published port arrives from the bridge, so a
+  # loopback bind would refuse the very connections this exists for. deck
+  # publishes it to the host's loopback only - but it stays open to anything
+  # else on the compose network, which is no auth away from your tunnel.
+  microsocks -i 0.0.0.0 -p "$SOCKS" >/tmp/microsocks.log 2>&1 &
+  echo "SOCKS5 up on the host at 127.0.0.1:$SOCKS   (log: /tmp/microsocks.log)"
+  echo "  Firefox : SOCKS v5, and tick 'Proxy DNS when using SOCKS v5'"
+  echo "  Burp    : Network > Connections > SOCKS proxy, tick 'Do DNS lookups'"
+  echo "  vhosts  : hosts add <ip> <name> - this container's /etc/hosts, not the Mac's"
 fi
 
 exec zsh -l
