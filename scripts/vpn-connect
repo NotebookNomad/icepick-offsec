@@ -6,22 +6,32 @@
 set -euo pipefail
 
 cfg="$HOME/workspace/${OVPN:?deck vpn sets this}"
-# `|| true` so a config openvpn rejects (missing CA, etc.) doesn't abort under
-# set -e - we still want to reach the fallback below and drop into a shell.
-openvpn --config "$cfg" --daemon --log /tmp/openvpn.log || true
+
+# Start from an empty log: the wait loop greps it, and openvpn can fail during
+# option parsing without ever opening it - leaving a previous run's success line
+# in place to satisfy the grep instantly and report a tunnel that isn't there.
+rm -f /tmp/openvpn.log
+
+# Keep the status instead of `|| true`-ing it away: a config openvpn rejects
+# must not abort under set -e, but it is also the one case where waiting is
+# pointless, and 20s of silence is a poor answer to a config that already failed.
+rc=0
+openvpn --config "$cfg" --daemon --log /tmp/openvpn.log || rc=$?
 
 # Wait for the handshake so we can report the tun0 IP; bail after 20s either way.
-for _ in $(seq 1 20); do
-  grep -q "Initialization Sequence Completed" /tmp/openvpn.log 2>/dev/null && break
-  sleep 1
-done
+if [ "$rc" -eq 0 ]; then
+  for _ in $(seq 1 20); do
+    grep -q "Initialization Sequence Completed" /tmp/openvpn.log 2>/dev/null && break
+    sleep 1
+  done
+fi
 
 # `|| true` again: ip exits 1 when tun0 is absent, and a bare assignment takes
 # the substitution's status - so under set -e this line, not the openvpn one,
 # is what would kill the fallback it exists to reach.
 tun=$(ip -o -4 addr show tun0 2>/dev/null || true)
 if [ -n "$tun" ]; then
-  echo "VPN up: $(awk '{print $4}' <<<"$tun")   (log: /tmp/openvpn.log)"
+  echo "VPN up: $(awk 'NR == 1 { print $4 }' <<<"$tun")   (log: /tmp/openvpn.log)"
 else
   echo "tun0 not up yet - tail /tmp/openvpn.log. auth-user-pass configs need a"
   echo "manual connect: openvpn --config $cfg"
@@ -37,10 +47,19 @@ if [ -n "${SOCKS:-}" ]; then
   # publishes it to the host's loopback only - but it stays open to anything
   # else on the compose network, which is no auth away from your tunnel.
   microsocks -i 0.0.0.0 -p "$SOCKS" >/tmp/microsocks.log 2>&1 &
-  echo "SOCKS5 up on the host at 127.0.0.1:$SOCKS   (log: /tmp/microsocks.log)"
-  echo "  Firefox : SOCKS v5, and tick 'Proxy DNS when using SOCKS v5'"
-  echo "  Burp    : Network > Connections > SOCKS proxy, tick 'Do DNS lookups'"
-  echo "  vhosts  : hosts add <ip> <name> - this container's /etc/hosts, not the Mac's"
+  socks_pid=$!
+  # Confirm it is still alive before claiming it is up. microsocks exits on a
+  # port already taken or below 1024, and announcing a proxy that died sends you
+  # off to configure Firefox for a connection that will just be refused.
+  sleep 0.3
+  if kill -0 "$socks_pid" 2>/dev/null; then
+    echo "SOCKS5 up on the host at 127.0.0.1:$SOCKS   (log: /tmp/microsocks.log)"
+    echo "  Firefox : SOCKS v5, and tick 'Proxy DNS when using SOCKS v5'"
+    echo "  Burp    : Network > Connections > SOCKS proxy, tick 'Do DNS lookups'"
+    echo "  vhosts  : hosts add <ip> <name> - this container's /etc/hosts, not the Mac's"
+  else
+    echo "microsocks failed to start on port $SOCKS - see /tmp/microsocks.log" >&2
+  fi
 fi
 
 exec zsh -l

@@ -90,8 +90,10 @@ Then browse `http://blog.thm`. Type the `http://`, or Firefox treats a bare
 `.thm` name as a search. Entries are saved in `workspace/hosts.thm` and
 re-applied every time you open a shell, since the container itself is thrown
 away each session. A room gives you a different IP each time you start it, so
-re-running `hosts add` with the same names replaces the old line rather than
-leaving a stale one to win the lookup.
+the most recent entry for a name wins — re-run `hosts add` after a restart and
+the new address takes over, while any other vhost you set up stays put. The file
+itself is only ever appended to, so notes and comments in it survive, and
+`hosts load` applies the same last-wins rule to edits you make by hand.
 
 To hunt for vhosts you haven't been given:
 

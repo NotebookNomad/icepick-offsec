@@ -119,9 +119,33 @@ _lab_hosts_load() {
   # index()==1 rather than a regex: the marker is a fixed string, not a pattern.
   local keep=/tmp/hosts.$$
   awk -v m="$_LAB_MARK" 'index($0, m) == 1 { exit } { print }' /etc/hosts > "$keep"
+
+  # Last mention of a name wins. A room hands you a new IP every time you start
+  # it, so hosts.thm accumulates - resolving that here rather than at `hosts
+  # add` time means the file stays append-only (nothing you hand-edit into it
+  # can be destroyed) and `hosts load` and shell startup get the same treatment.
+  # Walking backwards and keeping the first sighting of each name is one pass,
+  # and it keeps a sibling vhost alive when a later line re-points only one of
+  # the names on its line. Lowercased because resolution is case-insensitive;
+  # \r stripped because hosts.thm gets edited from the Mac side.
+  { cat "$keep"
+    echo "$_LAB_MARK"
+    awk '{ sub(/\r$/, ""); line[NR] = $0 }
+         END {
+           for (i = NR; i >= 1; i--) {
+             if (line[i] ~ /^[[:space:]]*(#|$)/) { out[i] = line[i]; continue }
+             n = split(line[i], f)
+             if (n < 2) continue          # no names on it - nothing to resolve
+             s = ""
+             for (j = 2; j <= n; j++)
+               if (!(tolower(f[j]) in seen)) { seen[tolower(f[j])] = 1; s = s " " f[j] }
+             if (s != "") out[i] = f[1] s
+           }
+           for (i = 1; i <= NR; i++) if (i in out) print out[i]
+         }' "$LAB_HOSTS"
   # Write *through* /etc/hosts - it is a bind mount, so replacing it with mv
   # fails with "Device or resource busy". Truncate-and-append is the only way.
-  { cat "$keep"; echo "$_LAB_MARK"; cat "$LAB_HOSTS"; } > /etc/hosts
+  } > /etc/hosts
   rm -f "$keep"
 }
 
@@ -129,20 +153,16 @@ hosts() {
   case "${1:-show}" in
     add)
       shift
-      [ $# -ge 2 ] || { echo "usage: hosts add <ip> <name> [name...]" >&2; return 1; }
-      local ip="$1"; shift
-      # A lab box gets a new IP every time you start it, so drop any line that
-      # already claims these names instead of appending beside it - the stale
-      # entry sorts first and would quietly win every lookup.
-      if [ -s "$LAB_HOSTS" ]; then
-        awk -v n="$*" 'BEGIN { split(n, a, " "); for (i in a) drop[a[i]] = 1 }
-                       { for (i = 2; i <= NF; i++) if ($i in drop) next; print }' \
-            "$LAB_HOSTS" > "$LAB_HOSTS.new" && mv "$LAB_HOSTS.new" "$LAB_HOSTS"
-      fi
-      echo "$ip $*" >> "$LAB_HOSTS"
-      _lab_hosts_load && echo "added: $ip $*"
+      # -n "$1" so an unset $IP cannot append a nameless line nothing can undo.
+      { [ $# -ge 2 ] && [ -n "$1" ]; } || {
+        echo "usage: hosts add <ip> <name> [name...]" >&2; return 1; }
+      # A plain append: _lab_hosts_load settles collisions when it writes
+      # /etc/hosts, so this never rewrites a file you may be editing yourself.
+      echo "$*" >> "$LAB_HOSTS"
+      _lab_hosts_load
+      echo "added: $*"
       ;;
-    load) _lab_hosts_load && echo "applied $LAB_HOSTS" ;;
+    load) _lab_hosts_load; echo "applied $LAB_HOSTS" ;;
     *)
       if [ -s "$LAB_HOSTS" ]; then
         cat "$LAB_HOSTS"
