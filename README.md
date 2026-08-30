@@ -1,26 +1,61 @@
 # icepick-offsec
 
-A Kali container for authorized bug bounty work and CTF labs. One build, one
-command to get in, and nothing installed on your Mac. The name nods to cyberpunk
-ICE (Intrusion Countermeasures Electronics): an icepick breaks it.
+A ready-made Kali Linux toolbox for authorized bug bounty work and CTF labs like
+TryHackMe and Hack The Box. It runs in a Docker container, so a few hundred
+security tools end up in a sandbox you throw away rather than installed on your
+computer. You drive all of it with one script: `./deck`.
 
-A full Kali VM eats disk, battery and patience. This is the same toolset in a
-container you throw away at the end of every session — you drive all of it
-through `./deck`.
+Installing Kali properly means a VM that eats disk, battery and patience — or
+mixing hundreds of security tools into the machine you actually live in. This is
+the same toolset, disposable. The name nods to cyberpunk ICE (Intrusion
+Countermeasures Electronics): an icepick breaks it.
 
-New to TryHackMe or Hack The Box? Skip to [Your first room](#your-first-room).
-It walks from a fresh clone to a browser pointed at a lab machine.
+**Never done this before?** Read the three bullets just below, run the commands
+in [Getting started](#getting-started), then follow
+[Your first room](#your-first-room) — it goes from a fresh clone to a browser
+pointed at a live lab machine. Unfamiliar word? There's a
+[glossary](#glossary) at the bottom.
+
+## How it works
+
+- **`./deck` is the only command you run on your own machine.** It's a small
+  wrapper around Docker. `./deck shell` drops you inside Kali, and everything
+  you type after that runs in the container, not on your computer.
+- **Every session is disposable.** You get a clean container each time, and it's
+  deleted the moment you exit. That's the point — a tool that scribbles all over
+  the filesystem is scribbling on something you were about to throw away.
+- **`workspace/` is the one exception.** That folder in this repo is shared with
+  the container, where it shows up as `~/workspace`. Notes, loot, scope files
+  and CTF binaries go there and survive. Everything else is gone when you exit.
 
 ## Requirements
 
-Docker Desktop running, and roughly 12 GB of free disk.
+- **Docker**, running. [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+  on macOS, or Docker Engine on Linux. Launch it before you run anything below.
+- **Roughly 12 GB of free disk.**
 
-**Tested only on Apple Silicon (ARM64) macOS with Docker Desktop.** The image
-builds for arm64 (GEF and the Go tools are chosen for it), and the networking
-model throughout — the Linux VM, `host.docker.internal`, LAN reachability, the
-Burp and reverse-shell notes — assumes Docker Desktop's VM. It may work on Intel
-macOS or a Linux Docker host with adjustments, but neither is tested or
-supported.
+macOS or Linux, Intel or Apple Silicon — the image builds for whatever you're
+on, and `./deck` sorts out the differences itself. (Windows via WSL2 ought to
+work, since the container is Linux either way, but it's untested.) You can also
+run it on a server and drive it from a laptop or tablet — see
+[Running it on a remote host](#running-it-on-a-remote-host).
+
+<details>
+<summary><b>Two host details that occasionally matter</b> — VPN support and CPU
+architecture. Skip unless something below bites you.</summary>
+
+- **`/dev/net/tun` is what `./deck vpn` needs.** Docker Desktop always has it,
+  as does any ordinary Linux machine. Only container-based VPSes (OpenVZ, LXC)
+  can't provide it, and there the container won't start at all — check with
+  `ls -l /dev/net/tun` before paying for one. Full-virtualisation VPSes (KVM,
+  Xen) are fine.
+- **Architecture decides the CTF binary-exploitation half.** `gdb`/GEF,
+  `pwntools`, `one_gadget` and `checksec` all run native, so an Intel/AMD host
+  debugs the x86-64 binaries that nearly every pwn challenge ships. On Apple
+  Silicon those binaries are the wrong architecture and would need qemu-user,
+  which isn't in the image. Web and recon tooling doesn't care either way.
+
+</details>
 
 ## Getting started
 
@@ -32,13 +67,20 @@ cd icepick-offsec
 ./deck shell        # you're in
 ```
 
-The build is the only slow part and you do it once; after that `./deck shell`
-takes a couple of seconds.
+Those first two commands are one-time setup. After that, `./deck shell` takes a
+couple of seconds and is how you start every session from then on.
 
-Everything you type in that shell runs inside the container, as root, on Kali.
-Nothing you install there touches your Mac, and nothing survives you exiting —
-**except** whatever you put in `~/workspace`. That's the repo's `workspace/`
-folder seen from inside, so notes, loot and scope files go there.
+You'll know it worked when your prompt changes to `[deck]` and a short banner
+lists a few commands. Try this first:
+
+```bash
+whereami            # who you are, what the container can do, is the internet up
+exit                # back to your own machine; the container is deleted
+```
+
+Being `root` in there is normal and safe — it's root *of the container*, not of
+your computer. [Why it runs as root](#why-it-runs-as-root) has the details if
+you're curious.
 
 ## Your first room
 
@@ -52,9 +94,10 @@ page, note the IP it gives you, and download your OpenVPN config from
 ./deck vpn ~/Downloads/yourname.ovpn --socks
 ```
 
-That copies the config into `workspace/`, brings up the tunnel, starts a SOCKS5
-proxy on `127.0.0.1:1080`, and drops you into a shell that's on the VPN. It
-prints your `tun0` address — your IP on the lab network, and the one you'll put
+That copies the config into `workspace/`, brings up the VPN tunnel, starts a
+SOCKS5 proxy on `127.0.0.1:1080` — a relay your browser can use to reach the lab
+network — and drops you into a shell that's on the VPN. It prints your `tun0`
+address, which is your own IP address on the lab network and the one you'll put
 in reverse shells later.
 
 Check you can reach the box:
@@ -66,7 +109,7 @@ nmap -sC -sV 10.10.115.42
 
 **2. Point a browser at it.**
 
-The VPN lives inside the container, so your Mac has no route to `10.10.x.x` by
+The VPN lives inside the container, so the host has no route to `10.10.x.x` by
 itself. In Firefox: Settings → Network Settings → **Manual proxy
 configuration**, SOCKS Host `127.0.0.1`, Port `1080`, **SOCKS v5**, and tick
 **Proxy DNS when using SOCKS v5**.
@@ -78,9 +121,10 @@ profile keeps it out of your everyday browsing.
 **3. When the room uses hostnames.**
 
 Plenty of rooms hand you a name rather than an IP, or hide a second site behind
-a vhost (`blog.thm`, `admin.blog.thm`). Because of that DNS checkbox, names are
-resolved *inside* the container, which is where they have to be defined — your
-Mac's `/etc/hosts` stays untouched:
+a vhost — a separate site on the same IP address, picked out by the hostname you
+ask for (`blog.thm`, `admin.blog.thm`). Because of that DNS checkbox, names are
+resolved *inside* the container, which is where they have to be defined — the
+host's `/etc/hosts` stays untouched:
 
 ```bash
 hosts add 10.10.115.42 blog.thm admin.blog.thm
@@ -102,19 +146,36 @@ ffuf -u http://10.10.115.42 -H 'Host: FUZZ.blog.thm' \
      -w $WORDLISTS/SecLists/Discovery/DNS/subdomains-top1million-5000.txt
 ```
 
-Every miss comes back the same size, so add `-fs <that size>` on the second run
-to leave only the hits.
+Every miss comes back the same size, so note that size and re-run with
+`-fs <that size>` to filter them out, leaving only the real hits.
 
 **4. Keep your notes on the host.**
 
 ```bash
-cd ~/workspace       # the repo's workspace/ folder, open in your Mac editor too
+cd ~/workspace       # the repo's workspace/ folder, open in your host editor too
 ```
 
 Exit the shell when you're done. That tears down the container, the tunnel and
 the proxy together.
 
 ## When something doesn't work
+
+Start here if you're new — these are the setup-stage ones:
+
+- **`Cannot connect to the Docker daemon`** — Docker isn't running. Start Docker
+  Desktop (or `sudo systemctl start docker` on Linux) and try again.
+- **`permission denied: ./deck`** — the script lost its executable bit:
+  `chmod +x deck`.
+- **`no space left on device` during the build** — the image needs ~10 GB and
+  the wordlists another ~2 GB. `docker builder prune` reclaims build cache and
+  `docker image prune` drops leftover layers, both safe here. Don't reach for
+  `docker system prune -a`: because every session is a `--rm` container, no
+  container is holding this image, so `-a` counts it as unused and deletes it.
+- **The build failed somewhere in the middle** — usually a network blip while
+  fetching packages. Just run `./deck build` again; finished steps are cached,
+  so it picks up near where it stopped.
+
+And these come up once you're actually working:
 
 - **`tun0 not up yet`** — most HTB/THM configs just work, but one that asks for
   a username and password needs `openvpn --config ~/workspace/lab.ovpn` run by
@@ -133,8 +194,10 @@ the proxy together.
 ## Usage
 
 ```
+./deck build              build the image (once, and after you edit it)
+./deck wordlists          download the wordlists (once)
 ./deck shell              interactive shell
-./deck listen [ports...]  shell with listener ports published to the LAN
+./deck listen [ports...]  shell with listener ports published on the host
 ./deck vpn <file.ovpn>    connect an HTB/THM VPN, then drop into a shell
       [--socks [port]]    ...plus a SOCKS5 proxy for a browser on the host
 ./deck run <cmd...>       one-shot command, no shell
@@ -143,9 +206,17 @@ the proxy together.
 ./deck clean --volumes    also drop wordlists + tool config (prompts first)
 ```
 
-In the shell: `whereami` shows user/caps/egress, `lockdown-lan` blocks your LAN,
-`inscope` reads `workspace/scope.txt`, `burp on` proxies through Burp, `hosts`
-manages lab vhosts.
+Commands that exist only inside the container's shell:
+
+```
+whereami        who you are, what the container may do, whether the internet works
+hosts           add and apply lab hostnames (blog.thm and friends)
+burp on|off     route the CLI tools through Burp running on your computer
+lockdown-lan    block the container from reaching your home network
+inscope         print workspace/scope.txt, your list of in-scope targets
+fetch-wordlists download the wordlists (same as ./deck wordlists)
+sl              jump to the SecLists wordlist folder
+```
 
 ## The lab proxy, in detail
 
@@ -166,9 +237,9 @@ hosts load                                       # re-apply after editing the fi
 ```
 
 Two cautions. The proxy takes no credentials, so for as long as that shell lives
-it's an open door onto the lab network for anything else on the compose network
-— it is published to `127.0.0.1` only, not your LAN, but don't leave sessions
-lying around. And `lockdown-lan` and a lab VPN don't mix, for the reason above.
+it's an open door onto the lab network. It's published to the host's `127.0.0.1`
+only, so nothing off the host can reach it — but anything else on the compose
+network can, so don't leave sessions lying around. And `lockdown-lan` and a lab VPN don't mix, for the reason above.
 
 ## Reverse shells and callbacks
 
@@ -181,10 +252,17 @@ needs to land depends on where the target is:
   `nc -lvnp 4444` works with no publishing. Put your `tun0` IP (`ip addr show tun0`) in the
   payload.
 - **A host on your LAN** — `./deck listen` publishes ports (default
-  `4444 8000 9001 443`, or pass your own) to the host, and prints the LAN IP to
-  aim callbacks at. Those ports are open to your whole LAN until you exit.
-- **The public internet** — neither helps; the host is behind your router's NAT.
-  Use a VPS or a tunnel (ngrok, SSH reverse tunnel) as the redirector.
+  `4444 8000 9001 443`, or pass your own) to the host, and prints the address on
+  the default route to aim callbacks at. Those ports stay open to anything that
+  can reach that address until you exit.
+- **The public internet** — behind a home router, neither helps; you're on the
+  far side of NAT, so use a tunnel (ngrok, SSH reverse tunnel) as the
+  redirector. On a host that already has a public IP, `./deck listen` *is* the
+  redirector, but the ports are then exposed to the internet and your provider's
+  firewall is the other half of the job. Check the address it prints, too: it
+  reads the host's own interface, so on AWS, GCE and Azure — where the public IP
+  is NAT'd upstream and never appears locally — you'll get a private `10.x`
+  address. `curl ifconfig.me` gives you the one a target can actually reach.
 
 ## Burp Suite
 
@@ -208,7 +286,54 @@ nuclei -list live.txt -proxy $BURP_PROXY
 
 `burp cert` saves the CA to `workspace/.burp-ca.der` and re-trusts it
 automatically in every later session, since the container itself is disposable.
-Override the location with `BURP_HOST` / `BURP_PORT` if your listener differs.
+
+If your listener isn't on the default host and port, set `BURP_HOST` /
+`BURP_PORT` — either on the host, where `./deck` passes them in, or inside the
+shell before you run `burp on`:
+
+```bash
+BURP_HOST=192.168.1.20 BURP_PORT=9090 ./deck shell
+```
+
+## Running it on a remote host
+
+Nothing assumes the Docker host is the machine you're typing on. Clone and build
+on a VPS, drive it over SSH — which is also how you use this from a tablet or a
+Chromebook. Two things change.
+
+**Sessions have to outlive the connection.** `deck` uses `docker compose run
+--rm`, so a dropped SSH session takes the container and whatever was running in
+it. Start tmux on the remote host, not just inside the container:
+
+```bash
+ssh vps
+tmux new -As deck     # same command reattaches after a disconnect
+./deck shell
+```
+
+On a mobile or flaky link, `mosh` instead of `ssh` is worth the install — it
+survives address changes and a sleeping client, which plain SSH does not.
+
+**Loopback is now the remote host's loopback.** `deck vpn --socks` publishes the
+proxy to `127.0.0.1` on the Docker host, and that stays right: on a box with a
+public IP, binding it wider is an unauthenticated route into the lab network,
+open to the internet. Forward the port rather than rebinding it —
+
+```bash
+ssh -L 1080:127.0.0.1:1080 vps
+```
+
+— and point your browser at `127.0.0.1:1080` locally, exactly as if the
+container were under your desk. Note that the SOCKS proxy is the *only* way in:
+`tun0` lives in the container's network namespace, so forwarding some other port
+off the VPS reaches nothing, because nothing on the VPS is listening on it.
+
+Burp is the one piece that assumes a GUI on the Docker host. On a headless
+remote, the simple answer is to skip it and use the SOCKS proxy. Forwarding your
+local Burp in with `ssh -R` does work, but it's fiddly: the reverse forward has
+to bind an address the container can reach rather than the VPS's loopback, which
+means `GatewayPorts clientspecified` in the remote `sshd_config`, and then
+`BURP_HOST` set to that address when you start the shell.
 
 ## What's in it
 
@@ -289,23 +414,53 @@ default capability set and succeeds with `NET_ADMIN` added.
 
 What root costs is bounded: `CAP_SYS_ADMIN` isn't in Docker's default set, and
 that's the capability nearly every container escape needs. `no-new-privileges`
-and the default seccomp profile are on. On macOS an escape lands in Docker's
-Linux VM, not the host.
+and the default seccomp profile are on. How much an escape would cost you does
+depend on the host, though: under Docker Desktop it lands in Docker's Linux VM,
+while on a Linux Docker host it lands on the host kernel itself.
 
 ## Limits
 
 - **A container is not a VM.** It stops accidents and ordinary malware, not a
   kernel exploit written to break out. For hostile samples use a disposable VM
   or gVisor (`--runtime=runsc`).
-- **It can reach your LAN.** Your router and NAS are as reachable as the
-  internet. `lockdown-lan` blocks RFC1918 from inside; rules are per container,
-  so re-run it each session.
+- **It can reach whatever the host can.** Your router and NAS at home; your
+  provider's internal network on a VPS. `lockdown-lan` blocks RFC1918 from
+  inside; rules are per container, so re-run it each session.
+- **Scanning out of a VPS is a provider question.** Lab VPN traffic is one
+  encrypted flow and nobody minds. A `nuclei` sweep leaving a rented box reads
+  as abuse to automated systems — check the AUP before you point recon at
+  bounty scope from one.
 - **`workspace/` is a real host directory** — the one path where container
   output touches the host.
 - **`@latest` in the Go stage** means builds aren't reproducible. Deliberate;
   pin them if you disagree.
 - **Scope is your job.** `scope.txt` and `inscope` are a convenience, not a
   control.
+
+## Glossary
+
+Terms this README uses that are worth pinning down if you're new:
+
+- **container** — an isolated Linux environment sharing your machine's kernel.
+  Lighter than a VM, and here, thrown away after every session.
+- **image** — the built template a container is started from. `./deck build`
+  makes it once; every `./deck shell` starts a fresh container from it.
+- **volume** — Docker-managed storage that outlives any single container. The
+  wordlists and your tool API keys live on volumes, which is why they survive.
+- **`tun0`** — the network interface OpenVPN creates. Its IP address is *your*
+  address on the lab network, so it's what a target calls back to.
+- **SOCKS proxy** — a relay that carries any TCP connection. `--socks` gives you
+  one so your ordinary browser can reach lab machines it has no route to.
+- **vhost** — several websites served from one IP address, chosen by the
+  hostname in the request. Why `blog.thm` and `admin.blog.thm` can be different
+  sites at the same address.
+- **reverse shell / callback** — instead of you connecting to a target, you make
+  the target connect back to a **listener** you're running. See
+  [Reverse shells and callbacks](#reverse-shells-and-callbacks).
+- **wordlist** — a big text file of candidate names or passwords that tools like
+  `ffuf` and `gobuster` try one by one.
+- **scope** — the targets a bug bounty program actually permits you to test.
+  Going outside it is the line between research and an incident.
 
 ## Layout
 
