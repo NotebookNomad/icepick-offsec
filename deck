@@ -65,7 +65,15 @@ case "${1:-}" in
       Darwin)
         iface=$(route get default 2>/dev/null | awk '/interface:/{print $2}') || true
         addr=$(ipconfig getifaddr "${iface:-en0}" 2>/dev/null || true)
-        addrs=$(ifconfig 2>/dev/null | awk '/[ \t]inet /{print $2}' | grep -v '^127\.') || true ;;
+        # Same intent as the Linux arm below: drop what a target can never call
+        # back to. Track the interface name across ifconfig's indented blocks so
+        # bridge/vmnet (Docker Desktop, UTM, VMware, Parallels) can be dropped by
+        # name, and skip self-assigned 169.254 addresses. utun stays - that is
+        # where a real VPN or tailnet address lives, which is the whole point.
+        addrs=$(ifconfig 2>/dev/null |
+                awk '/^[a-z][a-z0-9]*:/ { iface = $1; sub(/:$/, "", iface) }
+                     /[ \t]inet / && iface !~ /^(lo|bridge|vmnet|vmenet|awdl|llw)/ &&
+                     $2 !~ /^(127\.|169\.254\.)/ { print $2 }') || true ;;
       *)
         # A route lookup, not `hostname -I`: it picks the one source address
         # that egress actually uses on a multi-homed box.
@@ -73,12 +81,25 @@ case "${1:-}" in
                awk '{ for (i = 1; i < NF; i++) if ($i == "src") { print $(i+1); exit } }') || true
         # Every global IPv4, minus docker/bridge/veth - those reach nothing off-host.
         addrs=$(ip -o -4 addr show scope global 2>/dev/null |
-                awk '$2 !~ /^(docker|br-|veth)/ { print $4 }' | cut -d/ -f1) || true ;;
+                awk '$2 !~ /^(docker|br-|veth|virbr|cni)/ && $4 !~ /^169\.254\./ { print $4 }' |
+                cut -d/ -f1) || true ;;
     esac
-    addr=${addr:-<your-host-IP>}
+    # Where the lookup found nothing, promote the first real address rather than
+    # printing a placeholder labelled "host default route" - which is a claim
+    # about an address that was never found, sitting above the addresses that
+    # were.
+    why="(host default route)"
+    if [ -z "$addr" ]; then
+      addr=$(printf '%s\n' $addrs | head -1)
+      why="(no default route - first local address)"
+    fi
+    if [ -z "$addr" ]; then
+      addr='<your-host-IP>'
+      why="(could not detect one)"
+    fi
 
     echo "listener ports published on the host : ${ports[*]}"
-    echo "best-guess callback address          : $addr   (host default route)"
+    echo "best-guess callback address          : $addr   $why"
     for a in $addrs; do
       [ "$a" = "$addr" ] || echo "another address on this host         : $a"
     done
