@@ -41,7 +41,11 @@ fi
 # A SOCKS5 proxy here is the way a browser on the host reaches the target: every
 # port in one hop, and names resolve on this side, so /etc/hosts vhost entries
 # belong in this container rather than on the host.
-if [ -n "${SOCKS:-}" ]; then
+#
+# Only start it once tun0 is actually up. Without a tunnel it would just proxy
+# to nowhere - a listener on the host's loopback that refuses to route anything,
+# which looks like a broken proxy rather than a missing VPN.
+if [ -n "${SOCKS:-}" ] && [ -n "$tun" ]; then
   # 0.0.0.0, not 127.0.0.1: a published port arrives from the bridge, so a
   # loopback bind would refuse the very connections this exists for. deck
   # publishes it to the host's loopback only - but it stays open to anything
@@ -60,6 +64,9 @@ if [ -n "${SOCKS:-}" ]; then
   else
     echo "microsocks failed to start on port $SOCKS - see /tmp/microsocks.log" >&2
   fi
+elif [ -n "${SOCKS:-}" ]; then
+  echo "--socks skipped: no tun0, so the proxy would reach nothing. Connect the"
+  echo "tunnel by hand (openvpn --config $cfg), then re-run: deck vpn <cfg> --socks"
 fi
 
 exec zsh -l

