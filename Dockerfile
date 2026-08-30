@@ -96,6 +96,7 @@ COPY config/zshrc     /root/.zshrc
 COPY config/tmux.conf /root/.tmux.conf
 COPY scripts/fetch-wordlists /usr/local/bin/fetch-wordlists
 COPY scripts/lockdown-lan    /usr/local/bin/lockdown-lan
+COPY scripts/lockdown-wan    /usr/local/bin/lockdown-wan
 COPY scripts/vpn-connect     /usr/local/bin/vpn-connect
 
 WORKDIR /root/workspace

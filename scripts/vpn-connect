@@ -37,6 +37,18 @@ else
   echo "manual connect: openvpn --config $cfg"
 fi
 
+# Lock egress to the tunnel before the shell exists. Doing it here rather than
+# leaving it to you is the whole point: a tool run in the window between a live
+# tunnel and an applied firewall is exactly what this is meant to prevent.
+if [ "${EGRESS_FIREWALL:-off}" = "on" ]; then
+  if ! lockdown-wan "$cfg"; then
+    echo "egress lockdown failed - not handing you a shell that looks firewalled" >&2
+    echo "but is not. Reconnect without --lockdown to investigate." >&2
+    exit 1
+  fi
+  echo
+fi
+
 # The host has no route to the VPN, since tun0 lives in this container's netns.
 # A SOCKS5 proxy here is the way a browser on the host reaches the target: every
 # port in one hop, and names resolve on this side, so /etc/hosts vhost entries

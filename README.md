@@ -200,6 +200,7 @@ And these come up once you're actually working:
 ./deck listen [ports...]  shell with listener ports published on the host
 ./deck vpn <file.ovpn>    connect an HTB/THM VPN, then drop into a shell
       [--socks [port]]    ...plus a SOCKS5 proxy for a browser on the host
+      [--lockdown]        ...and block every egress path except the tunnel
 ./deck run <cmd...>       one-shot command, no shell
 ./deck status             what's running
 ./deck stop               stop everything
@@ -213,6 +214,7 @@ whereami        who you are, what the container may do, whether the internet wor
 hosts           add and apply lab hostnames (blog.thm and friends)
 burp on|off     route the CLI tools through Burp running on your computer
 lockdown-lan    block the container from reaching your home network
+lockdown-wan    the inverse: block everything except the VPN tunnel
 inscope         print workspace/scope.txt, your list of in-scope targets
 fetch-wordlists download the wordlists (same as ./deck wordlists)
 sl              jump to the SecLists wordlist folder
@@ -240,6 +242,46 @@ Two cautions. The proxy takes no credentials, so for as long as that shell lives
 it's an open door onto the lab network. It's published to the host's `127.0.0.1`
 only, so nothing off the host can reach it — but anything else on the compose
 network can, so don't leave sessions lying around. And `lockdown-lan` and a lab VPN don't mix, for the reason above.
+
+## Keeping traffic inside the VPN
+
+`lockdown-lan` blocks your private network and keeps the internet. During a lab
+session you usually want the opposite — nothing but the tunnel — so that a
+mistyped target or a tool that resolves outward can't touch anything beyond the
+box you're working on. That's `lockdown-wan`:
+
+```bash
+./deck vpn lab.ovpn --lockdown        # applied before you get a shell
+```
+
+It's applied by `vpn-connect` after the tunnel is up and **before** the shell
+starts, because a tool run in the gap between a live tunnel and an applied
+firewall is the thing this exists to prevent. It is fail-closed: if the rules
+can't be installed you get an error instead of a shell that looks protected and
+isn't. You can also run `lockdown-wan` by hand inside any VPN shell.
+
+What stays reachable: loopback, established flows, the Docker bridge subnet (so
+the `--socks` proxy can still answer), `tun0`, and the VPN server itself —
+resolved from the `.ovpn` before the policy flips, so the tunnel can re-handshake
+if it drops. Everything else is dropped, on IPv4 **and** IPv6, and the bridge
+gateway — the Docker host itself — is dropped explicitly rather than being swept
+up by the subnet allow.
+
+The rules match on the interface a packet leaves by, not its address. That's what
+makes this work where `lockdown-lan` can't: HTB and THM labs live in
+`10.0.0.0/8`, exactly the range `lockdown-lan` blocks. Don't run both.
+
+**It also empties `/etc/resolv.conf`, and it has to.** Docker's resolver at
+`127.0.0.11` is reached over loopback but forwards upstream from outside the
+container's network namespace, so DNS queries never traverse the OUTPUT chain and
+leak past any iptables rule you write. Emptying the resolver is the only fix
+available from inside. Lab names keep working, because `/etc/hosts` is consulted
+first and `hosts add` already puts them there — but public names stop resolving,
+which is the point. `KEEP_DNS=1` skips it and warns.
+
+Like `lockdown-lan`, the rules are per container and die with the session. And
+the same caveat applies to both: the container has `NET_ADMIN`, so anything
+running in it can flush these rules. This stops accidents, not hostile code.
 
 ## Reverse shells and callbacks
 

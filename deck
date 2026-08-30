@@ -18,6 +18,7 @@ deck - driver for icepick-offsec, a bug bounty & CTF toolkit
   ./deck listen [ports...]  shell with listener ports published on the host
   ./deck vpn <file.ovpn>    connect an HTB/THM VPN, then drop into a shell
         [--socks [port]]    ...and a SOCKS5 proxy on 127.0.0.1:1080 for your browser
+        [--lockdown]        ...and block all egress except the tunnel
   ./deck run <cmd...>       one-shot command, no shell
   ./deck wordlists          populate the shared wordlists volume (once)
   ./deck status             running containers
@@ -27,6 +28,7 @@ deck - driver for icepick-offsec, a bug bounty & CTF toolkit
 Inside the container:
   whereami        user, capabilities, egress
   lockdown-lan    block RFC1918 egress, keep the public internet
+  lockdown-wan    block everything except the VPN tunnel (needs tun0)
 EOF
 }
 
@@ -85,18 +87,19 @@ case "${1:-}" in
   # tunnel is live in the shell vpn-connect drops you into.
   vpn)
     shift
-    cfg="" socks=""
+    cfg="" socks="" lockdown=""
     while [ $# -gt 0 ]; do
       case "$1" in
         # The port is optional, so only claim the next argument when it is one.
         --socks) socks=1080
                  [[ "${2:-}" =~ ^[0-9]+$ ]] && { socks="$2"; shift; } ;;
+        --lockdown) lockdown=1 ;;
         -*)      echo "unknown option: $1" >&2; exit 1 ;;
         *)       cfg="$1" ;;
       esac
       shift
     done
-    [ -n "$cfg" ] || { echo "usage: ./deck vpn <file.ovpn> [--socks [port]]" >&2; exit 1; }
+    [ -n "$cfg" ] || { echo "usage: ./deck vpn <file.ovpn> [--socks [port]] [--lockdown]" >&2; exit 1; }
     [ -f "$cfg" ] || { echo "no such file: $cfg" >&2; exit 1; }
     base="$(basename "$cfg")"
     [ "$cfg" -ef "workspace/$base" ] || cp "$cfg" "workspace/$base"
@@ -106,6 +109,7 @@ case "${1:-}" in
     # route onto the lab network.
     args=(--rm -e OVPN="$base")
     [ -n "$socks" ] && args+=(-p "127.0.0.1:${socks}:${socks}" -e SOCKS="$socks")
+    [ -n "$lockdown" ] && args+=(-e EGRESS_FIREWALL=on)
 
     echo "connecting via $base - exit the shell to disconnect"
     "${DC[@]}" run "${args[@]}" deck vpn-connect

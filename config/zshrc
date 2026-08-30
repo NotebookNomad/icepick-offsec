@@ -220,6 +220,7 @@ cat <<'BANNER'
   `whereami` - show user, caps, egress
   `fetch-wordlists` - populate ~/wordlists (run once)
   `lockdown-lan` - block your LAN, keep the internet
+  `lockdown-wan` - block everything but the VPN (during a lab session)
   `burp on` - route tools through Burp running on the host
   `hosts add <ip> <name>` - lab vhosts, applied to /etc/hosts each session
   only ~/workspace is shared with the host. everything else dies with the container.

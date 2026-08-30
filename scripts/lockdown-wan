@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# Allow egress only through the VPN. The public internet, the provider's own
+# network and the Docker host are all dropped, so a mistyped target or a tool
+# that resolves outward cannot leave the tunnel. Needs NET_ADMIN.
+#
+# The inverse of lockdown-lan, and they do not compose. This one matches on the
+# interface a packet leaves by, which is what makes it work with HTB/THM labs in
+# 10.0.0.0/8 - the range lockdown-lan blocks outright.
+#
+#   lockdown-wan [config.ovpn]   defaults to $HOME/workspace/$OVPN
+set -euo pipefail
+
+cfg="${1:-}"
+[ -n "$cfg" ] || cfg="${OVPN:+$HOME/workspace/$OVPN}"
+
+# Decode CapEff from /proc, not `capsh --print`: its "Current IAB" line prints
+# !cap_net_admin when absent, and a plain grep matches that negated entry.
+eff=$(capsh --decode="$(awk '/^CapEff/{print $2}' /proc/self/status)" 2>/dev/null)
+if ! printf '%s' "$eff" | grep -q net_admin; then
+  echo "error: needs NET_ADMIN - check cap_add in docker-compose.yml." >&2
+  exit 1
+fi
+
+# Fail closed, twice over. A shell that believes it is firewalled but is not is
+# worse than one that never started: every later judgement rests on this.
+if ! iptables -L >/dev/null 2>&1; then
+  echo "error: iptables unavailable - refusing to claim egress is blocked." >&2
+  exit 1
+fi
+if ! ip link show tun0 >/dev/null 2>&1; then
+  echo "error: no tun0. Bring the VPN up first: deck vpn <file>.ovpn" >&2
+  exit 1
+fi
+
+# The bridge subnet this container sits on, kept reachable so a published port -
+# the SOCKS proxy - can still answer.
+local_nets=$(ip -o route show scope link dev eth0 2>/dev/null | awk '{print $1}') || true
+# The bridge gateway is the Docker host's own interface. Nothing in here needs
+# it, and on a Linux host it is the real machine rather than a VM, so it gets
+# dropped rather than swept up by the subnet allow above.
+gw=$(ip route show default dev eth0 2>/dev/null | awk '{print $3; exit}') || true
+
+iptables -F OUTPUT
+iptables -A OUTPUT -o lo -j ACCEPT
+# This rule must precede the gateway drop. A published port's replies travel
+# back toward the gateway as an established flow, so the SOCKS proxy dies
+# without it - and the symptom is a browser that hangs rather than an error.
+iptables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+if [ -n "$gw" ]; then
+  echo ">> dropping host gateway $gw"
+  iptables -A OUTPUT -d "$gw" -j DROP
+fi
+for net in $local_nets ${LOCAL_ALLOW_NETS:-}; do
+  echo ">> permitting $net"
+  iptables -A OUTPUT -d "$net" -j ACCEPT
+done
+echo ">> permitting tun0"
+iptables -A OUTPUT -o tun0 -j ACCEPT
+
+# Resolve the server now, while egress is still open - the policy flips to DROP
+# below and a name looked up after that cannot resolve. Read the config rather
+# than the openvpn log: it survives a log-format change, and it catches every
+# `remote` line rather than only the one that happened to win.
+if [ -n "$cfg" ] && [ -f "$cfg" ]; then
+  for host in $(awk '/^[[:space:]]*remote /{print $2}' "$cfg" | sort -u); do
+    for a in $(getent ahostsv4 "$host" 2>/dev/null | awk '{print $1}' | sort -u); do
+      echo ">> permitting VPN endpoint $host -> $a"
+      iptables -A OUTPUT -d "$a" -j ACCEPT
+    done
+  done
+else
+  echo ">> no .ovpn to read - the live tunnel survives on its established flow," >&2
+  echo "   but openvpn will not be able to re-handshake if it drops." >&2
+fi
+
+iptables -P OUTPUT DROP
+
+# This compose network is IPv4-only, but a host with IPv6 would otherwise leave
+# a second way out standing wide open behind a firewall that looks complete.
+if command -v ip6tables >/dev/null 2>&1 && ip6tables -L >/dev/null 2>&1; then
+  ip6tables -F OUTPUT
+  ip6tables -A OUTPUT -o lo -j ACCEPT
+  ip6tables -A OUTPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+  ip6tables -P OUTPUT DROP
+  echo ">> IPv6 egress dropped"
+else
+  echo ">> WARNING: ip6tables unavailable - IPv6 egress is NOT blocked." >&2
+fi
+
+# iptables cannot close this one. Docker's resolver at 127.0.0.11 is reached
+# over loopback, but it forwards upstream from *outside* this namespace, so the
+# OUTPUT chain never sees the query and every name lookup leaves the host no
+# matter what is above. Emptying resolv.conf is the only fix available from in
+# here. Lab names keep working: /etc/hosts is consulted first, and `hosts add`
+# is already where they live. Write through it - it is a bind mount, so `mv`
+# fails with "Device or resource busy".
+if [ "${KEEP_DNS:-0}" = "1" ]; then
+  echo ">> WARNING: KEEP_DNS=1 - name lookups still leak to the host's resolver." >&2
+else
+  printf '# emptied by lockdown-wan: Docker DNS forwards outside the firewall.\n' > /etc/resolv.conf
+  echo '>> DNS resolver emptied - use IPs, or: hosts add <ip> <name>'
+fi
+
+echo
+echo "Egress locked to the VPN. Internet and host unreachable."
+echo "Verify:  curl -m 3 https://example.com   (should fail)"
+echo "         ping -c 2 <lab-ip>              (should work)"
+echo "Rules are per container and die with the session."
