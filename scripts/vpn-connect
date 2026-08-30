@@ -53,6 +53,15 @@ fi
 # A SOCKS5 proxy here is the way a browser on the host reaches the target: every
 # port in one hop, and names resolve on this side, so /etc/hosts vhost entries
 # belong in this container rather than on the host.
+#
+# Started whether or not tun0 is up yet. microsocks is a plain TCP relay: it
+# routes per connection, not at startup, so it begins working the moment a
+# tunnel appears. Gating it on $tun would break the hand-connect path the README
+# documents for auth-user-pass configs - by the time you have run `openvpn` in
+# this shell there would be no proxy left to use, and deck has already published
+# the port for this container. A tunnel that finishes after the 20s wait, and a
+# `dev tap` config that comes up as tap0 rather than tun0, fail the same way.
+# So start it, and say plainly when it has nothing to reach yet.
 if [ -n "${SOCKS:-}" ]; then
   # 0.0.0.0, not 127.0.0.1: a published port arrives from the bridge, so a
   # loopback bind would refuse the very connections this exists for. deck
@@ -66,6 +75,11 @@ if [ -n "${SOCKS:-}" ]; then
   sleep 0.3
   if kill -0 "$socks_pid" 2>/dev/null; then
     echo "SOCKS5 up on the host at 127.0.0.1:$SOCKS   (log: /tmp/microsocks.log)"
+    if [ -z "$tun" ]; then
+      echo "  WAITING : no tun0, so the proxy reaches nothing yet. It starts"
+      echo "            working by itself once the tunnel is up:"
+      echo "            openvpn --config $cfg"
+    fi
     echo "  Firefox : SOCKS v5, and tick 'Proxy DNS when using SOCKS v5'"
     echo "  Burp    : Network > Connections > SOCKS proxy, tick 'Do DNS lookups'"
     echo "  vhosts  : hosts add <ip> <name> - this container's /etc/hosts, not the host's"
