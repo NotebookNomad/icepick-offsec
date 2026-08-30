@@ -2,6 +2,8 @@
 # Isolation here is: no host filesystem beyond ./workspace, no docker socket,
 # own network, resource caps. Dropping capabilities breaks nmap and root's own
 # volume writes - see the README before trying it.
+#
+# Nothing here is arch-specific: the image builds native on arm64 and amd64.
 
 services:
   deck:
@@ -12,10 +14,12 @@ services:
     stdin_open: true
     tty: true
     security_opt: [no-new-privileges:true]
-    # A runaway ffuf should not take the laptop down.
+    # A runaway ffuf should not take the machine down. The defaults are sized
+    # for a laptop that has to stay usable; on a dedicated host raise them in a
+    # .env next to this file (DECK_MEM=16g, DECK_CPUS=8).
     pids_limit: 512
-    mem_limit: 6g
-    cpus: 4
+    mem_limit: ${DECK_MEM:-6g}
+    cpus: ${DECK_CPUS:-4}
     # REQUIRED - do not remove. Three things need it:
     #  1. nmap. Kali's binary carries cap_net_admin as a *file* capability, and
     #     the kernel refuses to exec a binary whose file caps exceed the
@@ -25,6 +29,9 @@ services:
     #  2. lockdown-lan, to write iptables rules.
     #  3. openvpn, to configure the tun device for HTB / THM.
     cap_add: [NET_ADMIN]
+    # Needs a host that exposes tun: any Docker Desktop, and any KVM/Xen Linux
+    # box. Container-virtualised VPSes (OpenVZ, LXC) have no /dev/net/tun and
+    # the container will not start - that is the host's limit, not a setting.
     devices: ["/dev/net/tun:/dev/net/tun"]
     volumes:
       - ./workspace:/root/workspace
@@ -41,6 +48,11 @@ services:
       - toolcache:/root/.cache
     environment:
       TERM: xterm-256color
+      # Passed through so `BURP_HOST=10.0.0.5 ./deck shell` reaches the shell -
+      # without these the container never sees them. Empty when unset, which is
+      # what makes .zshrc fall back to working the address out for itself.
+      BURP_HOST: ${BURP_HOST:-}
+      BURP_PORT: ${BURP_PORT:-}
 
 volumes:
   wordlists:

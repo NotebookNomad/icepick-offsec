@@ -56,7 +56,7 @@ if [ -n "${SOCKS:-}" ]; then
     echo "SOCKS5 up on the host at 127.0.0.1:$SOCKS   (log: /tmp/microsocks.log)"
     echo "  Firefox : SOCKS v5, and tick 'Proxy DNS when using SOCKS v5'"
     echo "  Burp    : Network > Connections > SOCKS proxy, tick 'Do DNS lookups'"
-    echo "  vhosts  : hosts add <ip> <name> - this container's /etc/hosts, not the Mac's"
+    echo "  vhosts  : hosts add <ip> <name> - this container's /etc/hosts, not the host's"
   else
     echo "microsocks failed to start on port $SOCKS - see /tmp/microsocks.log" >&2
   fi

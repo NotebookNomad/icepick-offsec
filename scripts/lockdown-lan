@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Block egress to your LAN (RFC1918 + link-local + CGNAT) while leaving the
+# Block egress to private space (RFC1918 + link-local + CGNAT) while leaving the
 # public internet up - so a typo'd `-iL targets.txt` or an inward-resolving SSRF
-# can't reach your router or NAS. Needs NET_ADMIN; rules are per container.
+# can't reach your router and NAS at home, or the provider's internal network on
+# a VPS. Needs NET_ADMIN; rules are per container.
 set -euo pipefail
 
 # Decode CapEff from /proc, not `capsh --print`: its "Current IAB" line prints

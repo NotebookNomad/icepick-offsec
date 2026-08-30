@@ -42,13 +42,32 @@ inscope() {
 }
 
 # --- Burp on the host -------------------------------------------------------
-# Burp runs natively on macOS and this container proxies into it. In Burp add a
+# Burp runs on the host and this container proxies into it. In Burp add a
 # proxy listener bound to "All interfaces" (Proxy > Proxy settings) - the
 # default 127.0.0.1 listener is not reachable from a container.
-BURP_HOST="${BURP_HOST:-host.docker.internal}"
+#
+# Only Docker Desktop publishes host.docker.internal. On Linux Docker Engine
+# the name does not resolve, and the container's default gateway is the host.
+# Resolved here rather than by an extra_hosts entry: adding one would also add
+# an AAAA record that getent then returns first, changing what Docker Desktop
+# already does correctly.
+_docker_host() {
+  # Only trust the name if it answers with a private address. Docker copies the
+  # host's DNS search domains in, so under wildcard DNS or ISP NXDOMAIN
+  # hijacking the name resolves to a stranger's public IP - and `burp on` would
+  # then quietly ship your recon traffic to it.
+  local resolved
+  resolved=$(getent hosts host.docker.internal 2>/dev/null | awk 'NR == 1 { print $1 }') || true
+  case "$resolved" in
+    10.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*)
+      echo host.docker.internal; return ;;
+  esac
+  ip route 2>/dev/null | awk '/^default/ { print $3; exit }'
+}
+BURP_HOST="${BURP_HOST:-$(_docker_host)}"
 BURP_PORT="${BURP_PORT:-8080}"
-BURP_PROXY="http://${BURP_HOST}:${BURP_PORT}"
 BURP_CA="$HOME/workspace/.burp-ca.der"
+BURP_PROXY="http://${BURP_HOST}:${BURP_PORT}"
 
 # Trust Burp's CA so TLS through the proxy verifies instead of erroring. The
 # container is thrown away each session, so this re-runs at every shell start;
@@ -64,6 +83,15 @@ _burp_trust() {
 }
 
 burp() {
+  # Recomputed per call, so `BURP_HOST=... ; burp on` works in a live shell -
+  # the value set at startup would otherwise be the only one that ever counted.
+  BURP_PROXY="http://${BURP_HOST}:${BURP_PORT}"
+  if [ -z "$BURP_HOST" ]; then
+    echo "BURP_HOST is empty - could not work out the host's address from here." >&2
+    echo "  set it by hand:  BURP_HOST=<host-ip> burp on" >&2
+    echo "  or before you start:  BURP_HOST=<host-ip> ./deck shell" >&2
+    return 1
+  fi
   case "${1:-status}" in
     on)
       export http_proxy="$BURP_PROXY" https_proxy="$BURP_PROXY"
@@ -103,7 +131,7 @@ _burp_trust
 # --- lab vhosts -------------------------------------------------------------
 # THM/HTB rooms hand you names (blog.thm), and with `deck vpn --socks` those
 # names resolve on this side of the tunnel - so the /etc/hosts that matters is
-# this container's, not the Mac's. Docker regenerates /etc/hosts per container,
+# this container's, not the host's. Docker regenerates /etc/hosts per container,
 # so the entries live in workspace/ and get re-applied at every shell start.
 LAB_HOSTS="$HOME/workspace/hosts.thm"
 _LAB_MARK="# --- icepick lab hosts ---"
@@ -127,7 +155,7 @@ _lab_hosts_load() {
   # Walking backwards and keeping the first sighting of each name is one pass,
   # and it keeps a sibling vhost alive when a later line re-points only one of
   # the names on its line. Lowercased because resolution is case-insensitive;
-  # \r stripped because hosts.thm gets edited from the Mac side.
+  # \r stripped because hosts.thm gets edited from the host side.
   { cat "$keep"
     echo "$_LAB_MARK"
     awk '{ sub(/\r$/, ""); line[NR] = $0 }
