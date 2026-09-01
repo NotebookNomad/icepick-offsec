@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
-# vpn-connect's tunnel wait loop is `for _ in $(seq 1 20); do ... sleep 1; done`.
-# Collapse each wait so the "tunnel never comes up" path isn't a 20s test.
-exec /usr/bin/sleep 0.01
+# Collapse vpn-connect's tunnel-wait loop (20x `sleep 1`) so "tunnel never comes
+# up" isn't a 20s test. Every other duration - notably the 0.3s microsocks
+# liveness delay - is left real so its timing still means something.
+real=/usr/bin/sleep
+[ -x "$real" ] || real=/bin/sleep
+[ -x "$real" ] || real="sleep"   # last resort: whatever is on PATH
+
+args=("$@")
+[ "${1:-}" = "1" ] && args=(0.02)
+
+exec "$real" "${args[@]}"

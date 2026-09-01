@@ -14,6 +14,16 @@ setup() {
   cp "$(fixture ovpn/cert-only.ovpn)" "${HOME}/workspace/cert-only.ovpn"
   export OVPN="cert-only.ovpn"
   TUN_LINE="3: tun0    inet 10.10.15.5/23 scope global tun0\\       valid_lft forever preferred_lft forever"
+
+  # vpn-connect and the openvpn stub write these fixed paths. If another user
+  # owns them we can neither truncate nor trust the contents - a stale success
+  # line would give a false "VPN up:" - so bail rather than pass wrongly.
+  for f in /tmp/openvpn.log /tmp/microsocks.log; do
+    if [ -e "$f" ] && [ ! -O "$f" ]; then
+      skip "$f exists and is owned by another user - run in an isolated /tmp"
+    fi
+    rm -f "$f"
+  done
 }
 
 @test "tunnel down: says so, points at the manual connect, still opens a shell" {

@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-# Fake iproute2. Behaviour is driven by env vars the test sets:
-#   STUB_IP_ROUTE   text after "src" is what deck extracts; "noroute" => exit 2
-#   STUB_IP_ADDRS   file of `ip -o -4 addr show scope global` lines
-#   STUB_TUN        one `ip -o` line for tun0; empty => tun0 absent
-#   STUB_ETH_NET    `ip -o route show scope link dev eth0` line
-#   STUB_GW         `ip route show default dev eth0` line
+# Fake iproute2 for the calls `deck` and `vpn-connect` actually make. Driven by:
+#   STUB_IP_ROUTE  text after "src" is what deck extracts; "noroute" => exit 2
+#   STUB_IP_ADDRS  file of `ip -o -4 addr show scope global` lines
+#   STUB_TUN       one `ip -o` line for tun0; empty => tun0 absent
+# Anything else is a stub/script drift and must fail loudly, not pass green.
 printf 'ip %s\n' "$*" >> "${STUB_CALLLOG:-/dev/null}"
 
 case "$*" in
@@ -20,12 +19,8 @@ case "$*" in
   "-o -4 addr show tun0")
     if [ -n "${STUB_TUN:-}" ]; then printf '%s\n' "$STUB_TUN"; exit 0; fi
     echo 'Device "tun0" does not exist.' >&2; exit 1 ;;
-  "link show tun0")
-    [ -n "${STUB_TUN:-}" ] && exit 0
-    echo 'Device "tun0" does not exist.' >&2; exit 1 ;;
-  "-o route show scope link dev eth0")
-    printf '%s\n' "${STUB_ETH_NET:-172.24.0.0/24 dev eth0 proto kernel scope link src 172.24.0.5}" ;;
-  "route show default dev eth0")
-    printf '%s\n' "${STUB_GW:-default via 172.24.0.1 dev eth0}" ;;
-  *) exit 0 ;;
+  *)
+    echo "STUB ip: unhandled invocation: ip $*" >&2
+    echo "  (deck/vpn-connect changed how it calls ip - update tests/stubs/bin/ip)" >&2
+    exit 64 ;;
 esac

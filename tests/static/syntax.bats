@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# Every shipped script parses.
+# Every shipped script parses. scripts/ is globbed so a newly added helper is
+# covered automatically.
 
 load '../test_helper/common'
 
@@ -8,24 +9,13 @@ load '../test_helper/common'
   assert_success
 }
 
-@test "scripts/fetch-wordlists: bash -n" {
-  run bash -n "${PROJECT_ROOT}/scripts/fetch-wordlists"
-  assert_success
-}
-
-@test "scripts/lockdown-lan: bash -n" {
-  run bash -n "${PROJECT_ROOT}/scripts/lockdown-lan"
-  assert_success
-}
-
-@test "scripts/lockdown-wan: bash -n" {
-  run bash -n "${PROJECT_ROOT}/scripts/lockdown-wan"
-  assert_success
-}
-
-@test "scripts/vpn-connect: bash -n" {
-  run bash -n "${PROJECT_ROOT}/scripts/vpn-connect"
-  assert_success
+@test "every scripts/* parses (bash -n)" {
+  local f rc=0
+  for f in "${PROJECT_ROOT}"/scripts/*; do
+    [ -f "$f" ] || continue
+    bash -n "$f" || { echo "FAILED bash -n: $f"; rc=1; }
+  done
+  return "$rc"
 }
 
 @test "config/zshrc: zsh -n" {

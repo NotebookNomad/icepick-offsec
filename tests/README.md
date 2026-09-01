@@ -35,6 +35,8 @@ sets — `STUB_IP_ROUTE`, `STUB_IP_ADDRS`, `STUB_TUN`, `STUB_UNAME`,
 
 `unit/vpn_connect.bats` writes `/tmp/openvpn.log` and `/tmp/microsocks.log` at
 the fixed paths the real script uses — run it serially, not with `bats --jobs`.
+Its `setup` clears those files and `skip`s if another user owns them, so it is
+safe on a shared box but can't run two at once.
 
 ### Fixtures
 
