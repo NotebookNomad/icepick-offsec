@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# The compose file parses and interpolates against .env.
+# The compose file parses and stands on its own defaults (no .env needed -
+# .env is gitignored and absent on a fresh checkout).
 
 load '../test_helper/common'
 
@@ -9,12 +10,12 @@ setup() {
 }
 
 @test "docker-compose.yml validates" {
-  run docker compose -f "${PROJECT_ROOT}/docker-compose.yml" --env-file "${PROJECT_ROOT}/.env" config -q
+  run docker compose -f "${PROJECT_ROOT}/docker-compose.yml" config -q
   assert_success
 }
 
 @test "NET_ADMIN and the tun device are declared" {
-  run docker compose -f "${PROJECT_ROOT}/docker-compose.yml" --env-file "${PROJECT_ROOT}/.env" config
+  run docker compose -f "${PROJECT_ROOT}/docker-compose.yml" config
   assert_success
   assert_output --partial "NET_ADMIN"
   assert_output --partial "/dev/net/tun"
