@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Record the invocation and succeed. `deck` only ever shells out to
+# `docker compose ...`; tests assert on the recorded argv.
+printf 'docker %s\n' "$*" >> "${STUB_CALLLOG:-/dev/null}"
+exit 0

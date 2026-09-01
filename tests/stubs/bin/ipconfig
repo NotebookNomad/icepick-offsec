@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# macOS `ipconfig getifaddr <iface>`: return the address the test set.
+printf 'ipconfig %s\n' "$*" >> "${STUB_CALLLOG:-/dev/null}"
+if [ "${1:-}" = "getifaddr" ]; then
+  printf '%s\n' "${STUB_IFADDR:-192.168.1.20}"
+fi
+exit 0

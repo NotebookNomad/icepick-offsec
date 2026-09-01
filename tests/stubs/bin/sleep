@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# vpn-connect's tunnel wait loop is `for _ in $(seq 1 20); do ... sleep 1; done`.
+# Collapse each wait so the "tunnel never comes up" path isn't a 20s test.
+exec /usr/bin/sleep 0.01

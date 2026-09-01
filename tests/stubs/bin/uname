@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Report the OS the test asks for; delegate everything else to the real uname.
+printf 'uname %s\n' "$*" >> "${STUB_CALLLOG:-/dev/null}"
+if [ "${1:-}" = "-s" ]; then
+  echo "${STUB_UNAME:-Linux}"
+  exit 0
+fi
+for real in /usr/bin/uname /bin/uname; do
+  [ -x "$real" ] && exec "$real" "$@"
+done
+echo "Linux"

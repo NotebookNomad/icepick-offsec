@@ -1,0 +1,5 @@
+2: enp1s0    inet 203.0.113.10/24 brd 203.0.113.255 scope global enp1s0\       valid_lft forever preferred_lft forever
+3: tailscale0    inet 100.75.189.84/32 scope global tailscale0\       valid_lft forever preferred_lft forever
+4: docker0    inet 172.17.0.1/16 brd 172.17.255.255 scope global docker0\       valid_lft forever preferred_lft forever
+5: br-a1b2c3d4e5f6    inet 172.24.0.1/24 brd 172.24.0.255 scope global br-a1b2c3d4e5f6\       valid_lft forever preferred_lft forever
+6: virbr0    inet 192.168.122.1/24 brd 192.168.122.255 scope global virbr0\       valid_lft forever preferred_lft forever

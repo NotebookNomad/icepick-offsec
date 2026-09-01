@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# macOS `route get default`: deck only reads the "interface:" line.
+printf 'route %s\n' "$*" >> "${STUB_CALLLOG:-/dev/null}"
+echo "   interface: ${STUB_ROUTE_IFACE:-en0}"
+exit 0

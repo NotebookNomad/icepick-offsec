@@ -1,0 +1,25 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  static-and-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      # shellcheck and docker compose v2 are preinstalled on ubuntu-latest;
+      # zsh is not, and static/syntax.bats needs it for config/zshrc.
+      - name: Install zsh
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends zsh
+
+      - name: static + unit suites
+        run: ./tests/run.sh static unit

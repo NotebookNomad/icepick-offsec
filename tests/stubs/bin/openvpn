@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Fake openvpn. Writes the log line vpn-connect's wait loop greps for when the
+# test wants a live tunnel (STUB_TUN set), a failing log otherwise.
+printf 'openvpn %s\n' "$*" >> "${STUB_CALLLOG:-/dev/null}"
+
+log=/tmp/openvpn.log
+for ((i = 1; i < $#; i++)); do
+  [ "${!i}" = "--log" ] && { j=$((i + 1)); log="${!j}"; }
+done
+
+if [ -n "${STUB_TUN:-}" ]; then
+  printf '%s Initialization Sequence Completed\n' "$(date '+%F %T')" > "$log"
+else
+  printf '%s AUTH: Received control message: AUTH_FAILED\n' "$(date '+%F %T')" > "$log"
+fi
+exit 0
