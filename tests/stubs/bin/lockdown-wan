@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Stand-in for the real egress firewall. Exit code is STUB_LOCKDOWN_RC so tests
+# can drive vpn-connect's fail-closed path.
+printf 'lockdown-wan %s\n' "$*" >> "${STUB_CALLLOG:-/dev/null}"
+exit "${STUB_LOCKDOWN_RC:-0}"

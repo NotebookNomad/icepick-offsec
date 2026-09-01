@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# macOS `ifconfig` with no args: emit the fixture the test points at.
+printf 'ifconfig %s\n' "$*" >> "${STUB_CALLLOG:-/dev/null}"
+[ -n "${STUB_IFCONFIG:-}" ] && [ -f "${STUB_IFCONFIG}" ] && cat "$STUB_IFCONFIG"
+exit 0

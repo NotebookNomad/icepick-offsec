@@ -1,0 +1,1 @@
+2: enp1s0    inet 203.0.113.10/24 brd 203.0.113.255 scope global enp1s0\       valid_lft forever preferred_lft forever

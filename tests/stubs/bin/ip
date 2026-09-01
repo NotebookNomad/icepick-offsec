@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Fake iproute2 for the calls `deck` and `vpn-connect` actually make. Driven by:
+#   STUB_IP_ROUTE  text after "src" is what deck extracts; "noroute" => exit 2
+#   STUB_IP_ADDRS  file of `ip -o -4 addr show scope global` lines
+#   STUB_TUN       one `ip -o` line for tun0; empty => tun0 absent
+# Anything else is a stub/script drift and must fail loudly, not pass green.
+printf 'ip %s\n' "$*" >> "${STUB_CALLLOG:-/dev/null}"
+
+case "$*" in
+  "route get 1.1.1.1")
+    case "${STUB_IP_ROUTE:-}" in
+      noroute) echo "RTNETLINK answers: Network is unreachable" >&2; exit 2 ;;
+      "")      exit 0 ;;
+      *)       printf '%s\n' "$STUB_IP_ROUTE" ;;
+    esac ;;
+  "-o -4 addr show scope global")
+    [ -n "${STUB_IP_ADDRS:-}" ] && [ -f "${STUB_IP_ADDRS}" ] && cat "$STUB_IP_ADDRS"
+    exit 0 ;;
+  "-o -4 addr show tun0")
+    if [ -n "${STUB_TUN:-}" ]; then printf '%s\n' "$STUB_TUN"; exit 0; fi
+    echo 'Device "tun0" does not exist.' >&2; exit 1 ;;
+  *)
+    echo "STUB ip: unhandled invocation: ip $*" >&2
+    echo "  (deck/vpn-connect changed how it calls ip - update tests/stubs/bin/ip)" >&2
+    exit 64 ;;
+esac

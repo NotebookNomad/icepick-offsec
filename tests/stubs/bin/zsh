@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# vpn-connect ends with `exec zsh -l`. Record that the shell was handed over and
+# exit - a test asserting the *opposite* (fail-closed) checks this was NOT hit.
+printf 'zsh %s\n' "$*" >> "${STUB_CALLLOG:-/dev/null}"
+exit 0

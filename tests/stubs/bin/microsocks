@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# vpn-connect backgrounds this and then `kill -0`s it ~0.3s later, so it has to
+# stay alive past that check but not linger.
+printf 'microsocks %s\n' "$*" >> "${STUB_CALLLOG:-/dev/null}"
+real=/usr/bin/sleep
+[ -x "$real" ] || real=/bin/sleep
+[ -x "$real" ] || real="sleep"
+exec "$real" 1
