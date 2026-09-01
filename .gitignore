@@ -10,3 +10,7 @@ workspace/*
 *.ovpn
 *.pem
 *.key
+
+# ...but the test suite's synthetic OpenVPN fixtures are not credentials -
+# they carry no key material and are needed for the checkout to be complete.
+!tests/fixtures/ovpn/*.ovpn
