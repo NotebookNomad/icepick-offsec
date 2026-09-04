@@ -11,15 +11,20 @@ git submodule update --init --recursive   # once: bats + bats-assert + bats-supp
 ./tests/run.sh                            # static + unit (the default)
 ./tests/run.sh static                     # just the linters
 ./tests/run.sh unit
+./tests/run.sh integration                # needs a built image; ~90s
+./tests/run.sh all
 ```
 
-CI runs `static unit` on every PR (`.github/workflows/tests.yml`).
+CI runs `static unit` on every PR (`.github/workflows/tests.yml`). It does not
+run `integration`: that layer needs the ~10 GB image, which is not something a
+GitHub runner should build on every push. Run it locally after `./deck build`.
 
 ## Layout
 
 | dir | needs | what it checks |
 | --- | --- | --- |
 | `static/` | `shellcheck`, `zsh`, `docker` (each skipped if absent) | `bash -n` / `zsh -n` on every script; `shellcheck -x --severity=warning`; `docker compose config` validates and still declares `NET_ADMIN` + `/dev/net/tun` |
+| `integration/` | `docker` + a built `icepick-offsec:latest` (skipped whole if absent) | the image's contents (the Go tools, the headless gap, the `httpx` symlink, gf's patterns, GEF, the pwn toolchain), that `nmap` execs at all under its file capabilities, that `NET_ADMIN` and `/dev/net/tun` reach a running container, and both firewall scripts against real iptables |
 | `unit/` | nothing but `bash` | `deck listen` address detection (default-route guess, the tailnet/other-address list, docker/bridge/link-local filtering, the fallback ladder, the macOS branch); `deck vpn` flag parsing → the args handed to `docker compose run`; `scripts/vpn-connect` messaging for a live vs unconnected tunnel, the `--socks` "WAITING" note, and `--lockdown` fail-closed |
 
 `shellcheck` runs at `--severity=warning`: `deck` and `lockdown-wan` have two
@@ -44,14 +49,30 @@ safe on a shared box but can't run two at once.
 `fixtures/ovpn/*` are **synthetic** OpenVPN configs — structure only, no real
 key material, not working configs.
 
-## Not covered here (needs a built image / a real tunnel)
+### A trap the integration layer has to work around
 
-Run these by hand against a freshly built image:
+The scripts are `COPY`'d into the image, so a container runs whatever
+`./deck build` last captured, not what is in `scripts/`. `lockdown.bats`
+therefore mounts the working-tree copies over the packaged ones — without that
+it tests a stale artifact, and a mutation to `lockdown-wan` passes green.
+`image.bats` keeps one test comparing the two by checksum, so drift is reported
+rather than silently changing what the suite means. If it fails, rebuild.
 
-- `./deck build` succeeds; `./deck run sh -c 'which katana dalfox gau anew gf nuclei httpx subfinder'`
-- `./deck run nmap -sT -p80 scanme.nmap.org` — the NET_ADMIN / file-capabilities interaction
-- `./deck run zsh -lic 'whereami'` shows `cap_net_admin`
-- `python3 -c 'import pwn'`, `checksec`, `one_gadget`, `seccomp-tools` in the image
-- `lockdown-lan` / `lockdown-wan` actually installing iptables rules
-- a real HTB/THM `.ovpn` (+ credentials, never committed): `tun0` comes up, `deck vpn --socks` binds `127.0.0.1` only, `deck vpn --lockdown` blocks non-tunnel egress while the tunnel and `hosts add` names still work
+`lockdown.bats` fakes the tunnel with `ip tuntap add dev tun0`, which is enough
+to exercise every rule `lockdown-wan` writes. What it cannot show is a live
+tunnel surviving the policy flip — see below.
+
+## Not covered here (needs a real tunnel)
+
+The image half of this list is now `tests/integration/`. What is left needs a
+real HTB/THM `.ovpn` and credentials, which by design never enter the repo, so
+it stays manual on a box you have authenticated:
+
+- `tun0` actually comes up, and **survives** `lockdown-wan`'s policy flip — the
+  endpoint allow-rule is what lets OpenVPN re-handshake, and no synthetic
+  fixture can prove it works against a real server
+- the `--socks` proxy still reaches a lab box **after** lockdown, which is what
+  the established-flow rule above the gateway drop is for
+- `deck vpn --socks` binding `127.0.0.1` only, observed on a real session
+- `hosts add` names resolving through the tunnel with DNS emptied
 - a `./deck shell` in host-side `tmux` surviving an SSH disconnect
