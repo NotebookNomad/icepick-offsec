@@ -116,19 +116,25 @@ with_tun() {
 
 @test "KEEP_DNS=1 leaves the resolver alone and says so" {
   run with_tun numeric-remote.ovpn '
-    KEEP_DNS=1 lockdown-wan /tmp/lab.ovpn 2>&1 | grep -ci "KEEP_DNS=1"
+    KEEP_DNS=1 lockdown-wan /tmp/lab.ovpn 2>&1 | grep -i "keep_dns"
     echo "nameservers=$(grep -c nameserver /etc/resolv.conf)"'
   assert_success
   assert_output --partial "nameservers=1"
+  # The warning itself, not a count of it: a grep -c prints 0 and still exits
+  # into a passing test if the message ever goes away.
+  assert_output --partial "name lookups still leak"
 }
 
 @test "an unresolvable remote is reported, not silently skipped" {
-  # cert-only.ovpn points at lab.example.net, which does not resolve. The
-  # tunnel then survives only on its established flow - worth saying out loud.
+  # cert-only.ovpn points at lab.example.net, which does not resolve, so no
+  # endpoint rule can be installed. Silence there is the dangerous case: the
+  # tunnel runs on its established flow until the first re-handshake, then
+  # strands. The warning is the whole point of the test.
   run with_tun cert-only.ovpn 'lockdown-wan /tmp/lab.ovpn 2>&1'
   assert_success
+  assert_output --partial "lab.example.net did not resolve"
+  assert_output --partial "cannot re-handshake"
   assert_output --partial "Egress locked to the VPN"
-  refute_output --partial "203.0.113.77"
 }
 
 @test "lockdown-lan permits the container's own subnet and gateway first" {

@@ -23,14 +23,27 @@ pick_vpn() {
     [ -f "$given" ] || { echo "no such file: $given" >&2; return 1; }
     local base; base="$(basename "$given")"
     # Copy it in rather than mounting a second path: one read-only mount is the
-    # only thing the container needs to know about.
-    [ "$given" -ef "$VPN_DIR/$base" ] || cp "$given" "$VPN_DIR/$base"
+    # only thing the container needs to know about. Refuse to overwrite a
+    # different file of the same name - vpn/ is a store you are told to fill,
+    # not a scratch dir, and the thing being clobbered is a credential.
+    if [ "$given" -ef "$VPN_DIR/$base" ]; then
+      :
+    elif [ -e "$VPN_DIR/$base" ] && ! cmp -s "$given" "$VPN_DIR/$base"; then
+      echo "vpn/$base already exists and is a different file." >&2
+      echo "  remove or rename it, or use the one already there: ./deck vpn $base" >&2
+      return 1
+    else
+      cp "$given" "$VPN_DIR/$base"
+    fi
     printf '%s\n' "$base"; return
   fi
 
+  # -type l as well as -type f: a symlink here shows up in `ls` and would
+  # otherwise be silently absent from the menu. It is rejected below with a
+  # reason, which beats "no .ovpn in vpn/" while one is plainly sitting there.
   local found=()
   while IFS= read -r f; do found+=("$(basename "$f")"); done < <(
-    find "$VPN_DIR" -maxdepth 1 -type f -name '*.ovpn' 2>/dev/null | sort)
+    find "$VPN_DIR" -maxdepth 1 \( -type f -o -type l \) -name '*.ovpn' 2>/dev/null | sort)
 
   case ${#found[@]} in
     0) echo "no .ovpn in $VPN_DIR/ - put one there, or pass a path." >&2
@@ -54,11 +67,25 @@ pick_vpn() {
   local choice
   read -r -p "choose [0-${#found[@]}]: " choice
   case "$choice" in
-    ''|0)     echo "cancelled" >&2; return 1 ;;
+    '')       echo "cancelled" >&2; return 1 ;;
     *[!0-9]*) echo "not a number: $choice" >&2; return 1 ;;
   esac
+  # 10# before any comparison: "00" is all digits and passes a -le test, but
+  # $((00 - 1)) is -1, and bash indexes an array from the end for that - so an
+  # unnormalised "00" connects to the last config instead of cancelling.
+  choice=$((10#$choice))
+  [ "$choice" -ne 0 ] || { echo "cancelled" >&2; return 1; }
   [ "$choice" -le ${#found[@]} ] || { echo "out of range: $choice" >&2; return 1; }
   printf '%s\n' "${found[$((choice - 1))]}"
+}
+
+# Only vpn/ is mounted, so a link out of it resolves on the host and nowhere in
+# the container. Fail here with the fix, not later as an openvpn read error.
+reject_symlink() {
+  [ -L "$VPN_DIR/$1" ] || return 0
+  echo "vpn/$1 is a symlink, and the container mounts only vpn/ - copy the" >&2
+  echo "  file in instead of linking to it." >&2
+  return 1
 }
 
 usage() {
@@ -189,6 +216,10 @@ case "${1:-}" in
       shift
     done
     base="$(pick_vpn "$cfg")" || exit 1
+    # Belt and braces: an empty $base would launch a container that dies on
+    # vpn-connect's ${OVPN:?}, which says nothing useful about why.
+    [ -n "$base" ] || { echo "no config selected" >&2; exit 1; }
+    reject_symlink "$base" || exit 1
 
     # Loopback only. The default `-p 1080:1080` would hand anything that can
     # reach this host - your LAN, or the internet on a VPS - an unauthenticated

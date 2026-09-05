@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Container-side of `deck vpn`: bring the tunnel up, then hand off to a login
 # shell in this same container so tun0 and your shell share one network
-# namespace. $OVPN is the config filename deck staged into ~/workspace;
+# namespace. $OVPN is the config filename deck picked out of vpn/;
 # $SOCKS, if set, is the port `deck vpn --socks` published on the host.
 set -euo pipefail
 

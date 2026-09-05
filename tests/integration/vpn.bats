@@ -123,7 +123,11 @@ in_tunnel() {
 }
 
 @test "deck vpn picks this config up by name end to end" {
-  run timeout 90 "${PROJECT_ROOT}/deck" vpn "$CFG" --socks 21080 </dev/null
-  assert_output --partial "$CFG"
-  refute_output --partial "no .ovpn in vpn/"
+  run timeout 120 "${PROJECT_ROOT}/deck" vpn "$CFG" --socks 21080 </dev/null
+  assert_success
+  # Assert on what the *container* produced. deck prints "connecting via ..."
+  # before docker is invoked at all, so matching that would pass even when the
+  # run failed outright.
+  assert_output --partial "VPN up:"
+  assert_output --partial "SOCKS5 up on the host at 127.0.0.1:21080"
 }

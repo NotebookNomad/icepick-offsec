@@ -7,11 +7,11 @@
 # interface a packet leaves by, which is what makes it work with HTB/THM labs in
 # 10.0.0.0/8 - the range lockdown-lan blocks outright.
 #
-#   lockdown-wan [config.ovpn]   defaults to $HOME/workspace/$OVPN
+#   lockdown-wan [config.ovpn]   defaults to $HOME/vpn/$OVPN
 set -euo pipefail
 
 cfg="${1:-}"
-[ -n "$cfg" ] || cfg="${OVPN:+$HOME/workspace/$OVPN}"
+[ -n "$cfg" ] || cfg="${OVPN:+$HOME/vpn/$OVPN}"
 
 # Decode CapEff from /proc, not `capsh --print`: its "Current IAB" line prints
 # !cap_net_admin when absent, and a plain grep matches that negated entry.
@@ -63,10 +63,18 @@ iptables -A OUTPUT -o tun0 -j ACCEPT
 # `remote` line rather than only the one that happened to win.
 if [ -n "$cfg" ] && [ -f "$cfg" ]; then
   for host in $(awk '/^[[:space:]]*remote /{print $2}' "$cfg" | sort -u); do
+    resolved=0
     for a in $(getent ahostsv4 "$host" 2>/dev/null | awk '{print $1}' | sort -u); do
       echo ">> permitting VPN endpoint $host -> $a"
       iptables -A OUTPUT -d "$a" -j ACCEPT
+      resolved=1
     done
+    # Say so. Unresolved means no rule, which means the tunnel runs on its
+    # established flow until the first re-handshake and then strands.
+    if [ "$resolved" -eq 0 ]; then
+      echo ">> WARNING: $host did not resolve - endpoint NOT permitted." >&2
+      echo "   The tunnel cannot re-handshake; reconnect before locking down." >&2
+    fi
   done
 else
   echo ">> no .ovpn to read - the live tunnel survives on its established flow," >&2

@@ -130,11 +130,59 @@ menu() {
   refute_called '^docker '
 }
 
+@test "menu: 00 cancels rather than indexing from the end" {
+  # "00" is all digits and passes a -le test, but $((00 - 1)) is -1 and bash
+  # reads that as the last element - so it used to connect to the last config.
+  command -v expect >/dev/null || skip "expect not installed"
+  drop cert-only.ovpn lab.ovpn
+  drop auth-user-pass.ovpn htb.ovpn
+  run menu 00
+  assert_output --partial "cancelled"
+  refute_called '^docker '
+}
+
+@test "menu: a leading-zero number still selects the right entry" {
+  command -v expect >/dev/null || skip "expect not installed"
+  drop cert-only.ovpn lab.ovpn
+  drop auth-user-pass.ovpn htb.ovpn
+  run menu 02
+  assert_called 'OVPN=lab\.ovpn'
+}
+
 @test "menu: a non-number is refused" {
   command -v expect >/dev/null || skip "expect not installed"
   drop cert-only.ovpn lab.ovpn
   drop auth-user-pass.ovpn htb.ovpn
   run menu x
   assert_output --partial "not a number: x"
+  refute_called '^docker '
+}
+
+@test "an outside path will not clobber a different config of the same name" {
+  # vpn/ is a store the README tells you to fill, and the file being replaced
+  # is a credential.
+  drop auth-user-pass.ovpn cert-only.ovpn
+  local before; before=$(shasum "$PWD/vpn/cert-only.ovpn" | awk '{print $1}')
+  run "$DECK" vpn "$(fixture ovpn/cert-only.ovpn)"
+  assert_failure
+  assert_output --partial "already exists and is a different file"
+  [ "$(shasum "$PWD/vpn/cert-only.ovpn" | awk '{print $1}')" = "$before" ]
+  refute_called '^docker '
+}
+
+@test "an outside path identical to what is already there is accepted" {
+  drop cert-only.ovpn cert-only.ovpn
+  run "$DECK" vpn "$(fixture ovpn/cert-only.ovpn)"
+  assert_success
+  assert_called 'OVPN=cert-only\.ovpn'
+}
+
+@test "a symlinked config is refused with the reason" {
+  # Only vpn/ is mounted, so a link out of it resolves on the host and nowhere
+  # in the container - openvpn would fail with an unhelpful read error.
+  ln -s "$(fixture ovpn/cert-only.ovpn)" "$PWD/vpn/linked.ovpn"
+  run "$DECK" vpn
+  assert_failure
+  assert_output --partial "is a symlink"
   refute_called '^docker '
 }
