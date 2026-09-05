@@ -4,6 +4,12 @@
 workspace/*
 !workspace/.gitkeep
 
+# VPN configs and any credentials beside them. The directory is tracked so a
+# fresh clone has somewhere to drop one; nothing inside it is.
+vpn/*
+!vpn/.gitkeep
+!vpn/README.md
+
 # Local tooling state and credentials.
 .claude/
 .env

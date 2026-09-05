@@ -10,8 +10,8 @@ VC="${PROJECT_ROOT}/scripts/vpn-connect"
 setup() {
   use_stubs
   export HOME="${BATS_TEST_TMPDIR}/home"
-  mkdir -p "${HOME}/workspace"
-  cp "$(fixture ovpn/cert-only.ovpn)" "${HOME}/workspace/cert-only.ovpn"
+  mkdir -p "${HOME}/vpn"
+  cp "$(fixture ovpn/cert-only.ovpn)" "${HOME}/vpn/cert-only.ovpn"
   export OVPN="cert-only.ovpn"
   TUN_LINE="3: tun0    inet 10.10.15.5/23 scope global tun0\\       valid_lft forever preferred_lft forever"
 
@@ -30,7 +30,7 @@ setup() {
   run "$VC"
   assert_success
   assert_output --partial "tun0 not up yet"
-  assert_output --partial "manual connect: openvpn --config ${HOME}/workspace/cert-only.ovpn"
+  assert_output --partial "manual connect: openvpn --config ${HOME}/vpn/cert-only.ovpn"
   refute_output --partial "VPN up:"
   refute_output --partial "WAITING"
   assert_called '^zsh -l'
@@ -72,7 +72,7 @@ setup() {
   export EGRESS_FIREWALL=on
   run "$VC"
   assert_success
-  assert_called "lockdown-wan ${HOME}/workspace/cert-only\\.ovpn"
+  assert_called "lockdown-wan ${HOME}/vpn/cert-only\\.ovpn"
   assert_called '^zsh -l'
 }
 

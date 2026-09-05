@@ -27,6 +27,9 @@ pointed at a live lab machine. Unfamiliar word? There's a
 - **`workspace/` is the one exception.** That folder in this repo is shared with
   the container, where it shows up as `~/workspace`. Notes, loot, scope files
   and CTF binaries go there and survive. Everything else is gone when you exit.
+- **VPN configs go in `vpn/`.** Drop your `.ovpn` there and `./deck vpn` finds
+  it. It's mounted read-only and kept apart from `workspace/` because a lab
+  config is a credential. Both folders are gitignored.
 
 ## Requirements
 
@@ -90,11 +93,22 @@ page, note the IP it gives you, and download your OpenVPN config from
 
 **1. Connect, with a proxy for your browser.**
 
+Put the `.ovpn` in the repo's `vpn/` folder, then:
+
+```bash
+./deck vpn --socks
+```
+
+One config in `vpn/` and it just uses it. Several, and it lists them and asks
+which — `0` backs out. You can name one instead (`./deck vpn lab.ovpn`), which
+is also how you pick from a script, and a path from anywhere still works and is
+copied in:
+
 ```bash
 ./deck vpn ~/Downloads/yourname.ovpn --socks
 ```
 
-That copies the config into `workspace/`, brings up the VPN tunnel, starts a
+That brings up the VPN tunnel, starts a
 SOCKS5 proxy on `127.0.0.1:1080` — a relay your browser can use to reach the lab
 network — and drops you into a shell that's on the VPN. It prints your `tun0`
 address, which is your own IP address on the lab network and the one you'll put
@@ -178,7 +192,7 @@ Start here if you're new — these are the setup-stage ones:
 And these come up once you're actually working:
 
 - **`tun0 not up yet`** — most HTB/THM configs just work, but one that asks for
-  a username and password needs `openvpn --config ~/workspace/lab.ovpn` run by
+  a username and password needs `openvpn --config ~/vpn/lab.ovpn` run by
   hand. `cat /tmp/openvpn.log` tells you which.
 - **Can't reach the box** — check it's still started on the room page; lab
   machines expire on their own after an hour or two. Also don't run
@@ -198,7 +212,8 @@ And these come up once you're actually working:
 ./deck wordlists          download the wordlists (once)
 ./deck shell              interactive shell
 ./deck listen [ports...]  shell with listener ports published on the host
-./deck vpn <file.ovpn>    connect an HTB/THM VPN, then drop into a shell
+./deck vpn [file.ovpn]    connect an HTB/THM VPN, then drop into a shell
+                          (no argument: use or choose from vpn/)
       [--socks [port]]    ...plus a SOCKS5 proxy for a browser on the host
       [--lockdown]        ...and block every egress path except the tunnel
 ./deck run <cmd...>       one-shot command, no shell
@@ -511,7 +526,9 @@ Dockerfile              two-stage: Go tools, then Kali runtime
 docker-compose.yml      the container and its isolation settings
 deck                    build / shell / vpn / run / wordlists / clean
 config/                 zshrc, tmux.conf
-scripts/                fetch-wordlists, lockdown-lan, vpn-connect
+scripts/                fetch-wordlists, lockdown-lan, lockdown-wan, vpn-connect
+tests/                  bats suites - see tests/README.md
+vpn/                    drop .ovpn files here; mounted read-only, gitignored
 workspace/              shared with the host
 ```
 

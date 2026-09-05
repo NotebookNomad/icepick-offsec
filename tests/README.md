@@ -24,7 +24,7 @@ GitHub runner should build on every push. Run it locally after `./deck build`.
 | dir | needs | what it checks |
 | --- | --- | --- |
 | `static/` | `shellcheck`, `zsh`, `docker` (each skipped if absent) | `bash -n` / `zsh -n` on every script; `shellcheck -x --severity=warning`; `docker compose config` validates and still declares `NET_ADMIN` + `/dev/net/tun` |
-| `integration/` | `docker` + a built `icepick-offsec:latest` (skipped whole if absent) | the image's contents (the Go tools, the headless gap, the `httpx` symlink, gf's patterns, GEF, the pwn toolchain), that `nmap` execs at all under its file capabilities, that `NET_ADMIN` and `/dev/net/tun` reach a running container, and both firewall scripts against real iptables |
+| `integration/` | `docker` + a built `icepick-offsec:latest`, and for `vpn.bats` a real config in `vpn/` (each skipped if absent) | the image's contents (the Go tools, the headless gap, the `httpx` symlink, gf's patterns, GEF, the pwn toolchain), that `nmap` execs at all under its file capabilities, that `NET_ADMIN` and `/dev/net/tun` reach a running container, and both firewall scripts against real iptables |
 | `unit/` | nothing but `bash` | `deck listen` address detection (default-route guess, the tailnet/other-address list, docker/bridge/link-local filtering, the fallback ladder, the macOS branch); `deck vpn` flag parsing → the args handed to `docker compose run`; `scripts/vpn-connect` messaging for a live vs unconnected tunnel, the `--socks` "WAITING" note, and `--lockdown` fail-closed |
 
 `shellcheck` runs at `--severity=warning`: `deck` and `lockdown-wan` have two
@@ -62,17 +62,23 @@ rather than silently changing what the suite means. If it fails, rebuild.
 to exercise every rule `lockdown-wan` writes. What it cannot show is a live
 tunnel surviving the policy flip — see below.
 
-## Not covered here (needs a real tunnel)
+## The live-tunnel layer
 
-The image half of this list is now `tests/integration/`. What is left needs a
-real HTB/THM `.ovpn` and credentials, which by design never enter the repo, so
-it stays manual on a box you have authenticated:
+`integration/vpn.bats` is dormant until you put a working `.ovpn` in `vpn/`.
+With one there it connects for real and covers what no fixture can: the
+handshake completing, the tunnel **surviving** `lockdown-wan`'s policy flip (the
+endpoint allow-rule is what keeps OpenVPN going once the policy is `DROP`), the
+internet and the host gateway being unreachable afterwards while the tunnel
+routes remain, and the SOCKS proxy still relaying through the lockdown — what
+the established-flow rule above the gateway drop exists for.
 
-- `tun0` actually comes up, and **survives** `lockdown-wan`'s policy flip — the
-  endpoint allow-rule is what lets OpenVPN re-handshake, and no synthetic
-  fixture can prove it works against a real server
-- the `--socks` proxy still reaches a lab box **after** lockdown, which is what
-  the established-flow rule above the gateway drop is for
-- `deck vpn --socks` binding `127.0.0.1` only, observed on a real session
-- `hosts add` names resolving through the tunnel with DNS emptied
-- a `./deck shell` in host-side `tmux` surviving an SSH disconnect
+Each test connects in its own `--rm` container on a random high port, so it will
+not disturb a session you already have open, but it does put real traffic on
+your lab VPN. With several configs present, name one:
+
+```sh
+ICEPICK_VPN=htb.ovpn ./tests/run.sh integration
+```
+
+Still manual, because it needs two machines: a `./deck shell` in host-side
+`tmux` surviving an SSH disconnect.

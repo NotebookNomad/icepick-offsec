@@ -37,7 +37,7 @@ refute_called() {
 # `deck` cd's to its own directory on startup, so tests invoke "$PWD/deck".
 sandbox_deck() {
   local d="${BATS_TEST_TMPDIR}/repo"
-  mkdir -p "$d/scripts" "$d/config" "$d/workspace"
+  mkdir -p "$d/scripts" "$d/config" "$d/workspace" "$d/vpn"
   cp "$PROJECT_ROOT/deck" "$d/deck"
   cp "$PROJECT_ROOT/docker-compose.yml" "$d/"
   cp "$PROJECT_ROOT"/scripts/* "$d/scripts/"

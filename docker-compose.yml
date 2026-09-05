@@ -35,6 +35,9 @@ services:
     devices: ["/dev/net/tun:/dev/net/tun"]
     volumes:
       - ./workspace:/root/workspace
+      # Read-only, and separate from workspace/: a lab config is a credential,
+      # and workspace/ is where loot, notes and target lists pile up.
+      - ./vpn:/root/vpn:ro
       - wordlists:/root/wordlists
       # Three of these are caches that re-download on `run --rm` without a volume
       # (nuclei alone keeps an 83 MB template set in ~/.local). toolconfig is the

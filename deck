@@ -9,6 +9,58 @@ DC=(docker compose)
 # Every session is a throwaway container against the same volumes.
 dcrun() { "${DC[@]}" run --rm deck "$@"; }
 
+VPN_DIR=vpn
+
+# Resolve which config to connect with, and echo its basename - the container
+# sees vpn/ mounted at /root/vpn, so a bare name is all that travels. Prompts go
+# to stderr so the caller can capture stdout.
+pick_vpn() {
+  local given="$1"
+  if [ -n "$given" ]; then
+    # A bare name resolves inside vpn/ first, so `deck vpn lab.ovpn` works from
+    # anywhere and is also how a script picks one without a menu.
+    if [ -f "$VPN_DIR/$given" ]; then printf '%s\n' "$given"; return; fi
+    [ -f "$given" ] || { echo "no such file: $given" >&2; return 1; }
+    local base; base="$(basename "$given")"
+    # Copy it in rather than mounting a second path: one read-only mount is the
+    # only thing the container needs to know about.
+    [ "$given" -ef "$VPN_DIR/$base" ] || cp "$given" "$VPN_DIR/$base"
+    printf '%s\n' "$base"; return
+  fi
+
+  local found=()
+  while IFS= read -r f; do found+=("$(basename "$f")"); done < <(
+    find "$VPN_DIR" -maxdepth 1 -type f -name '*.ovpn' 2>/dev/null | sort)
+
+  case ${#found[@]} in
+    0) echo "no .ovpn in $VPN_DIR/ - put one there, or pass a path." >&2
+       echo "  HTB: Access > OpenVPN.   THM: tryhackme.com/access" >&2
+       return 1 ;;
+    1) echo "using $VPN_DIR/${found[0]}" >&2
+       printf '%s\n' "${found[0]}"; return ;;
+  esac
+
+  # Several. Ask, when there is someone to ask; otherwise say what the choices
+  # are, since a menu written to a pipe would hang waiting on an answer.
+  if [ ! -t 0 ]; then
+    echo "several configs in $VPN_DIR/ - name the one you want:" >&2
+    printf '  ./deck vpn %s\n' "${found[@]}" >&2
+    return 1
+  fi
+  echo "configs in $VPN_DIR/:" >&2
+  local i=1
+  for f in "${found[@]}"; do echo "  $i) $f" >&2; i=$((i + 1)); done
+  echo "  0) none - cancel" >&2
+  local choice
+  read -r -p "choose [0-${#found[@]}]: " choice
+  case "$choice" in
+    ''|0)     echo "cancelled" >&2; return 1 ;;
+    *[!0-9]*) echo "not a number: $choice" >&2; return 1 ;;
+  esac
+  [ "$choice" -le ${#found[@]} ] || { echo "out of range: $choice" >&2; return 1; }
+  printf '%s\n' "${found[$((choice - 1))]}"
+}
+
 usage() {
   cat <<'EOF'
 deck - driver for icepick-offsec, a bug bounty & CTF toolkit
@@ -16,7 +68,8 @@ deck - driver for icepick-offsec, a bug bounty & CTF toolkit
   ./deck build              build the image
   ./deck shell              interactive shell
   ./deck listen [ports...]  shell with listener ports published on the host
-  ./deck vpn <file.ovpn>    connect an HTB/THM VPN, then drop into a shell
+  ./deck vpn [file.ovpn]    connect an HTB/THM VPN, then drop into a shell
+                            (no argument: use or choose from vpn/)
         [--socks [port]]    ...and a SOCKS5 proxy on 127.0.0.1:1080 for your browser
         [--lockdown]        ...and block all egress except the tunnel
   ./deck run <cmd...>       one-shot command, no shell
@@ -32,7 +85,7 @@ Inside the container:
 EOF
 }
 
-mkdir -p workspace
+mkdir -p workspace vpn
 
 case "${1:-}" in
   build) "${DC[@]}" build ;;
@@ -117,10 +170,10 @@ case "${1:-}" in
     "${DC[@]}" run --rm "${pub[@]}" deck
     ;;
 
-  # Stage the .ovpn into workspace (the only bind mount; *.ovpn is gitignored),
-  # then hand off to vpn-connect in-container. The filename travels as an env var
-  # so an odd name can't break anything. Same container = same netns, so the
-  # tunnel is live in the shell vpn-connect drops you into.
+  # The config comes from vpn/, which is mounted read-only in the container, so
+  # only its basename travels - as an env var, so an odd name can't break
+  # anything. With no argument pick_vpn finds it or asks. Same container = same
+  # netns, so the tunnel is live in the shell vpn-connect drops you into.
   vpn)
     shift
     cfg="" socks="" lockdown=""
@@ -135,10 +188,7 @@ case "${1:-}" in
       esac
       shift
     done
-    [ -n "$cfg" ] || { echo "usage: ./deck vpn <file.ovpn> [--socks [port]] [--lockdown]" >&2; exit 1; }
-    [ -f "$cfg" ] || { echo "no such file: $cfg" >&2; exit 1; }
-    base="$(basename "$cfg")"
-    [ "$cfg" -ef "workspace/$base" ] || cp "$cfg" "workspace/$base"
+    base="$(pick_vpn "$cfg")" || exit 1
 
     # Loopback only. The default `-p 1080:1080` would hand anything that can
     # reach this host - your LAN, or the internet on a VPS - an unauthenticated

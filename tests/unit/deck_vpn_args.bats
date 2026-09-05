@@ -51,10 +51,10 @@ setup() {
   refute_called 'EGRESS_FIREWALL'
 }
 
-@test "no config: usage error, exit 1, nothing launched" {
+@test "no config and an empty vpn/: says where to put one, launches nothing" {
   run "$DECK" vpn
   assert_failure
-  assert_output --partial "usage: ./deck vpn <file.ovpn>"
+  assert_output --partial "no .ovpn in vpn/"
   refute_called '^docker '
 }
 
@@ -72,8 +72,10 @@ setup() {
   refute_called '^docker '
 }
 
-@test "the config is staged into workspace/" {
+@test "an outside path is copied into vpn/, not workspace/" {
+  # workspace/ is where loot and notes accumulate; a lab config is a credential.
   run "$DECK" vpn "$CERT"
   assert_success
-  [ -f "$PWD/workspace/cert-only.ovpn" ]
+  [ -f "$PWD/vpn/cert-only.ovpn" ]
+  [ ! -f "$PWD/workspace/cert-only.ovpn" ]
 }

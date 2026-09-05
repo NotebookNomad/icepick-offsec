@@ -5,7 +5,9 @@
 # $SOCKS, if set, is the port `deck vpn --socks` published on the host.
 set -euo pipefail
 
-cfg="$HOME/workspace/${OVPN:?deck vpn sets this}"
+# vpn/ on the host, mounted read-only. Separate from workspace/ on purpose: a
+# lab config is a credential and does not belong with the loot.
+cfg="$HOME/vpn/${OVPN:?deck vpn sets this}"
 
 # Start from an empty log: the wait loop greps it, and openvpn can fail during
 # option parsing without ever opening it - leaving a previous run's success line
