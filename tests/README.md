@@ -80,5 +80,15 @@ your lab VPN. With several configs present, name one:
 ICEPICK_VPN=htb.ovpn ./tests/run.sh integration
 ```
 
+One thing a config alone cannot show: that the proxy carries traffic to a lab
+host. Without a box running, the most the proxy test can say is that microsocks
+survived the lockdown and still completes a SOCKS handshake — curl returns 7
+when nothing is listening, 28 or 97 when the proxy answers but the target does
+not, 0 only on a real relay. Start a machine and name it to get the last one:
+
+```sh
+ICEPICK_LAB_TARGET=10.129.75.4 ./tests/run.sh integration
+```
+
 Still manual, because it needs two machines: a `./deck shell` in host-side
 `tmux` surviving an SSH disconnect.

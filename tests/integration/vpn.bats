@@ -85,21 +85,41 @@ in_tunnel() {
   refute_output --partial "INTERNET REACHED"
 }
 
-@test "the SOCKS proxy still relays through the lockdown" {
-  # microsocks binds 0.0.0.0 inside the container and relays out tun0. If the
-  # established-flow rule were below the gateway drop this would hang.
+@test "the SOCKS proxy survives the lockdown and still speaks SOCKS" {
+  # What this can show without a box running: the proxy is still up and still
+  # completing the SOCKS handshake after the policy flip. Measured exit codes,
+  # through microsocks: 7 = nothing listening (the proxy died), 28/97 = the
+  # proxy answered but the target did not, 0 = a full relay. So 7 is the
+  # failure being excluded here, and only that.
+  #
+  # It does NOT show traffic reaching a lab host - that needs a machine to be
+  # running, which is the test below.
   run in_tunnel '
     microsocks -i 0.0.0.0 -p "$SOCKS" >/tmp/microsocks.log 2>&1 &
     sleep 1
     lockdown-wan /root/vpn/'"${CFG}"' >/dev/null 2>&1
-    kill -0 %1 2>/dev/null && echo "PROXY ALIVE" || echo "PROXY DIED"
-    curl -m 8 -s -o /dev/null --socks5 "127.0.0.1:$SOCKS" http://10.10.10.10 
+    pgrep -x microsocks >/dev/null && echo "PROXY ALIVE" || echo "PROXY DIED"
+    curl -m 8 -s -o /dev/null --socks5 "127.0.0.1:$SOCKS" http://10.129.1.1
     echo "relay-exit=$?"'
   assert_success
   assert_output --partial "PROXY ALIVE"
-  # Whatever the lab answers, the proxy must not refuse the connection itself:
-  # curl 7 is "could not connect to proxy", which is the failure being excluded.
   refute_output --partial "relay-exit=7"
+}
+
+@test "the proxy carries traffic to a live lab host through the lockdown" {
+  # The real thing, and the only test here that proves the established-flow rule
+  # above the gateway drop does its job. Needs a box you have started:
+  #   ICEPICK_LAB_TARGET=10.129.75.4 ./tests/run.sh integration
+  [ -n "${ICEPICK_LAB_TARGET:-}" ] \
+    || skip "set ICEPICK_LAB_TARGET=<ip of a running lab box> to check a real relay"
+  run in_tunnel '
+    microsocks -i 0.0.0.0 -p "$SOCKS" >/tmp/microsocks.log 2>&1 &
+    sleep 1
+    lockdown-wan /root/vpn/'"${CFG}"' >/dev/null 2>&1
+    curl -m 15 -s -o /dev/null --socks5 "127.0.0.1:$SOCKS" "http://'"${ICEPICK_LAB_TARGET}"'"
+    echo "relay-exit=$?"'
+  assert_success
+  assert_output --partial "relay-exit=0"
 }
 
 @test "deck vpn picks this config up by name end to end" {
