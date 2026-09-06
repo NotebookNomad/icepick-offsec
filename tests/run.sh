@@ -38,8 +38,9 @@ done
 case " ${dirs[*]} " in
   *" integration "*)
     if docker image inspect icepick-offsec:latest >/dev/null 2>&1; then
-      names=$(cd ../scripts && ls | sort | tr '\n' ' ')
-      host_sum=$( (cd ../scripts && cat $(ls | sort)) | shasum | awk '{print $1}')
+      # A glob, not $(ls): same order, and no word splitting to quote around.
+      names=$(cd ../scripts && printf '%s ' *)
+      host_sum=$( (cd ../scripts && cat -- *) | shasum | awk '{print $1}')
       img_sum=$(docker compose -f ../docker-compose.yml run --rm -T deck \
                   sh -c "cd /usr/local/bin && cat $names" 2>/dev/null |
                 shasum | awk '{print $1}')
