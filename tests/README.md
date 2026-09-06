@@ -52,11 +52,19 @@ key material, not working configs.
 ### A trap the integration layer has to work around
 
 The scripts are `COPY`'d into the image, so a container runs whatever
-`./deck build` last captured, not what is in `scripts/`. `lockdown.bats`
-therefore mounts the working-tree copies over the packaged ones — without that
-it tests a stale artifact, and a mutation to `lockdown-wan` passes green.
-`image.bats` keeps one test comparing the two by checksum, so drift is reported
-rather than silently changing what the suite means. If it fails, rebuild.
+`./deck build` last captured, not what is in `scripts/`. A green run against a
+stale image is the exact false pass this suite exists to prevent — and it is
+easy to cause, since editing a script does not rebuild anything.
+
+`tests/run.sh` therefore checksums `scripts/` against the image's copies before
+the integration suite and **refuses to run** if they differ, telling you to
+`./deck build`. One container start, about two seconds, no network.
+
+Building automatically instead would look tidier and is a trap: the Dockerfile
+carries a `# syntax=` directive that pulls a frontend from Docker Hub, and sits
+on the moving `kalilinux/kali-rolling` tag. Warm and online that is seconds;
+across a network change or a base-image bump it is tens of minutes, or an `apt`
+failure that fails the suite for reasons that have nothing to do with the code.
 
 `lockdown.bats` fakes the tunnel with `ip tuntap add dev tun0`, which is enough
 to exercise every rule `lockdown-wan` writes. What it cannot show is a live

@@ -47,3 +47,24 @@ sandbox_deck() {
 }
 
 fixture() { printf '%s\n' "${TESTS_DIR}/fixtures/$1"; }
+
+# --- integration helpers ----------------------------------------------------
+# Everything below needs Docker and a built image; the unit and static suites
+# never touch them.
+
+# Skip the whole file unless there is a docker, a compose v2, and an image to
+# run. Called from setup(), where bats' skip aborts the test.
+require_image() {
+  command -v docker >/dev/null || skip "docker not installed"
+  docker compose version >/dev/null 2>&1 || skip "docker compose v2 not available"
+  docker image inspect icepick-offsec:latest >/dev/null 2>&1 \
+    || skip "icepick-offsec:latest not built - run ./deck build"
+}
+
+# One throwaway container off the repo's own compose file, so the project name -
+# and therefore the volumes - match what deck uses rather than spawning a
+# parallel set. tests/run.sh builds first, so the image carries the working-tree
+# scripts and nothing needs mounting over them.
+compose_run() {
+  docker compose -f "${PROJECT_ROOT}/docker-compose.yml" run --rm -T "$@"
+}

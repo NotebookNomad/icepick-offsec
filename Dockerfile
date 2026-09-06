@@ -94,10 +94,10 @@ COPY --from=gotools /out/ /usr/local/bin/
 # Last, so editing one of these does not rebuild anything above it.
 COPY config/zshrc     /root/.zshrc
 COPY config/tmux.conf /root/.tmux.conf
-COPY scripts/fetch-wordlists /usr/local/bin/fetch-wordlists
-COPY scripts/lockdown-lan    /usr/local/bin/lockdown-lan
-COPY scripts/lockdown-wan    /usr/local/bin/lockdown-wan
-COPY scripts/vpn-connect     /usr/local/bin/vpn-connect
+# The whole directory, not four named files: adding a script should be one new
+# file, not an edit here as well. tests/static/*.bats glob scripts/* for the
+# same reason, and tests/integration/image.bats checks what landed.
+COPY scripts/ /usr/local/bin/
 
 WORKDIR /root/workspace
 

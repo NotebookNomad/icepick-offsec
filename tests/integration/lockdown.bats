@@ -10,23 +10,11 @@
 
 load '../test_helper/common'
 
-setup() {
-  command -v docker >/dev/null || skip "docker not installed"
-  docker compose version >/dev/null 2>&1 || skip "docker compose v2 not available"
-  docker image inspect icepick-offsec:latest >/dev/null 2>&1 \
-    || skip "icepick-offsec:latest not built - run ./deck build"
-}
+setup() { require_image; }
 
-# The scripts are COPY'd into the image, so a container runs whatever
-# `./deck build` last captured. Mount the working-tree copies over them: without
-# this the suite tests a stale artifact, and a mutation to scripts/lockdown-wan
-# sails straight through a green run. image.bats covers the packaged copies.
-dcrun() {
-  docker compose -f "${PROJECT_ROOT}/docker-compose.yml" run --rm -T \
-    -v "${PROJECT_ROOT}/scripts/lockdown-wan:/usr/local/bin/lockdown-wan:ro" \
-    -v "${PROJECT_ROOT}/scripts/lockdown-lan:/usr/local/bin/lockdown-lan:ro" \
-    "$@"
-}
+# tests/run.sh builds before this suite, so the image already carries the
+# working-tree scripts - no need to mount copies over the packaged ones.
+dcrun() { compose_run "$@"; }
 
 # Run a script body in a container that already has a tun0, with an .ovpn
 # fixture mounted at /tmp/lab.ovpn. Rules die with the container.
@@ -45,6 +33,20 @@ with_tun() {
   assert_output --partial "rc=1"
   # Fail closed means fail *clean*: the default policy must be untouched.
   assert_output --partial "-P OUTPUT ACCEPT"
+}
+
+@test "run bare, lockdown-wan finds the config via \$OVPN" {
+  # The path this covers is the one that broke: lockdown-wan joins $HOME/vpn to
+  # $OVPN when given no argument, and it was still joining $HOME/workspace after
+  # the configs moved. Every other test here passes the config explicitly, so
+  # nothing exercised the default - and the failure is silent, an endpoint rule
+  # quietly not installed before the policy flips to DROP.
+  run with_tun numeric-remote.ovpn '
+    mkdir -p /tmp/h/vpn && cp /tmp/lab.ovpn /tmp/h/vpn/lab.ovpn
+    HOME=/tmp/h OVPN=lab.ovpn lockdown-wan 2>&1'
+  assert_success
+  assert_output --partial "permitting VPN endpoint 203.0.113.77"
+  refute_output --partial "no .ovpn to read"
 }
 
 @test "lockdown-wan sets a default-deny OUTPUT policy" {

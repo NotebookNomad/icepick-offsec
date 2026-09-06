@@ -8,17 +8,12 @@
 
 load '../test_helper/common'
 
-setup() {
-  command -v docker >/dev/null || skip "docker not installed"
-  docker compose version >/dev/null 2>&1 || skip "docker compose v2 not available"
-  docker image inspect icepick-offsec:latest >/dev/null 2>&1 \
-    || skip "icepick-offsec:latest not built - run ./deck build"
-}
+setup() { require_image; }
 
 # Run in a throwaway container off the repo's own compose file, so the project
 # name (and therefore the volumes) match what deck uses rather than spawning a
 # parallel set.
-dcrun() { docker compose -f "${PROJECT_ROOT}/docker-compose.yml" run --rm -T "$@"; }
+dcrun() { compose_run "$@"; }
 
 @test "the 8 Go tools Kali does not package are on PATH" {
   run dcrun deck sh -c 'command -v katana dalfox gau waybackurls anew unfurl qsreplace gf'
@@ -87,27 +82,13 @@ dcrun() { docker compose -f "${PROJECT_ROOT}/docker-compose.yml" run --rm -T "$@
 }
 
 @test "the toolkit's own scripts are installed and executable" {
-  run dcrun deck sh -c 'for s in fetch-wordlists lockdown-lan lockdown-wan vpn-connect; do
+  # Globbed, not listed - tests/static/*.bats glob scripts/* for the same
+  # reason, so a newly added script cannot quietly skip the gate.
+  local names; names=$(cd "${PROJECT_ROOT}/scripts" && echo *)
+  run dcrun deck sh -c 'for s in '"$names"'; do
                           test -x "/usr/local/bin/$s" || { echo "missing: $s"; exit 1; }
                         done'
   assert_success
-}
-
-@test "the packaged scripts match the working tree" {
-  # Everything else in this file describes the image as built. If the scripts in
-  # it are older than scripts/, that gap is worth knowing about explicitly:
-  # lockdown.bats mounts the working-tree copies precisely so it does not test a
-  # stale artifact, and this is what says the two have drifted. Rebuild to clear.
-  for s in fetch-wordlists lockdown-lan lockdown-wan vpn-connect; do
-    tree_sum=$(shasum "${PROJECT_ROOT}/scripts/$s" | awk '{print $1}')
-    img_sum=$(dcrun deck shasum "/usr/local/bin/$s" | awk '{print $1}' | tr -d '\r')
-    [ "$tree_sum" = "$img_sum" ] || {
-      echo "image is stale for scripts/$s - run ./deck build"
-      echo "  tree:  $tree_sum"
-      echo "  image: $img_sum"
-      return 1
-    }
-  done
 }
 
 @test "whereami reports the capability and the workspace mount" {

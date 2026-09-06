@@ -16,20 +16,16 @@
 load '../test_helper/common'
 
 setup() {
-  command -v docker >/dev/null || skip "docker not installed"
-  docker image inspect icepick-offsec:latest >/dev/null 2>&1 \
-    || skip "icepick-offsec:latest not built - run ./deck build"
+  require_image
 
+  # Only needs one config or a skip, so a glob does the job - deck's own
+  # find/-type l discovery is for a different question (prompt vs report).
   CFG="${ICEPICK_VPN:-}"
   if [ -z "$CFG" ]; then
-    local found=()
-    while IFS= read -r f; do found+=("$(basename "$f")"); done < <(
-      find "${PROJECT_ROOT}/vpn" -maxdepth 1 -type f -name '*.ovpn' 2>/dev/null | sort)
-    case ${#found[@]} in
-      0) skip "no .ovpn in vpn/ - drop one there to enable the live-tunnel tests" ;;
-      1) CFG="${found[0]}" ;;
-      *) skip "several configs in vpn/ - set ICEPICK_VPN=<name> to choose" ;;
-    esac
+    local found=("${PROJECT_ROOT}"/vpn/*.ovpn)
+    [ -e "${found[0]}" ] || skip "no .ovpn in vpn/ - drop one there to enable these"
+    [ ${#found[@]} -eq 1 ] || skip "several configs in vpn/ - set ICEPICK_VPN=<name>"
+    CFG="$(basename "${found[0]}")"
   fi
   [ -f "${PROJECT_ROOT}/vpn/${CFG}" ] || skip "no such config: vpn/${CFG}"
   export CFG
@@ -40,20 +36,31 @@ setup() {
 # on 1080 is not disturbed.
 in_tunnel() {
   local port=$((20000 + RANDOM % 10000))
-  docker compose -f "${PROJECT_ROOT}/docker-compose.yml" run --rm -T \
-    -v "${PROJECT_ROOT}/scripts/lockdown-wan:/usr/local/bin/lockdown-wan:ro" \
-    -p "127.0.0.1:${port}:${port}" -e "SOCKS=${port}" -e "OVPN=${CFG}" \
-    deck bash -c "
-      openvpn --config /root/vpn/${CFG} --daemon --log /tmp/openvpn.log
-      for _ in \$(seq 1 40); do
-        grep -q 'Initialization Sequence Completed' /tmp/openvpn.log 2>/dev/null && break
-        sleep 1
-      done
-      $*"
+  # $OVPN and $LAB are read inside the container, so test bodies below refer to
+  # them by name instead of splicing host values through the quoting.
+  #
+  # The handshake wait duplicates scripts/vpn-connect's loop rather than calling
+  # it, because vpn-connect ends in `exec zsh -l` and would never return. If the
+  # log path or OpenVPN's success string changes, fix both.
+  # The body goes in on stdin, not spliced into `bash -c '...'`. Embedding it
+  # means the caller's quoting has to survive this function's quoting, and a
+  # single-quoted awk program inside a single-quoted body silently closes the
+  # wrong quote. On stdin it is passed through verbatim.
+  { cat <<'PREAMBLE'
+openvpn --config "/root/vpn/$OVPN" --daemon --log /tmp/openvpn.log
+for _ in $(seq 1 40); do
+  grep -q "Initialization Sequence Completed" /tmp/openvpn.log 2>/dev/null && break
+  sleep 1
+done
+PREAMBLE
+    printf '%s\n' "$*"
+  } | compose_run -p "127.0.0.1:${port}:${port}" \
+        -e "SOCKS=${port}" -e "OVPN=${CFG}" -e "LAB=${ICEPICK_LAB_TARGET:-}" \
+        deck bash -s
 }
 
 @test "the tunnel actually comes up" {
-  run in_tunnel 'ip -o -4 addr show tun0 | awk "{print \"TUN=\" \$4}"'
+  run in_tunnel 'set -- $(ip -o -4 addr show tun0); echo "TUN=$4"'
   assert_success
   assert_output --partial "TUN="
 }
@@ -62,7 +69,7 @@ in_tunnel() {
   # The endpoint allow-rule is the whole reason this does not strand you. No
   # synthetic fixture can show it working against a real server.
   run in_tunnel '
-    lockdown-wan /root/vpn/'"${CFG}"' >/dev/null 2>&1
+    lockdown-wan "/root/vpn/$OVPN" >/dev/null 2>&1
     sleep 5
     ip -o -4 addr show tun0 >/dev/null && echo "TUNNEL ALIVE" || echo "TUNNEL GONE"
     iptables -S OUTPUT | grep -q "^-P OUTPUT DROP" && echo "POLICY DROP"'
@@ -73,8 +80,8 @@ in_tunnel() {
 
 @test "the internet is unreachable once locked down, the tunnel is not" {
   run in_tunnel '
-    gw=$(ip route | awk "/^default/{print \$3; exit}")
-    lockdown-wan /root/vpn/'"${CFG}"' >/dev/null 2>&1
+    gw=$(ip route show default | cut -d" " -f3)
+    lockdown-wan "/root/vpn/$OVPN" >/dev/null 2>&1
     curl -m 6 -s -o /dev/null https://example.com && echo "INTERNET REACHED" || echo "internet blocked"
     ping -c1 -W3 "$gw" >/dev/null 2>&1 && echo "GATEWAY REACHED" || echo "gateway blocked"
     ip route | grep -q tun0 && echo "tunnel routes present"'
@@ -97,7 +104,7 @@ in_tunnel() {
   run in_tunnel '
     microsocks -i 0.0.0.0 -p "$SOCKS" >/tmp/microsocks.log 2>&1 &
     sleep 1
-    lockdown-wan /root/vpn/'"${CFG}"' >/dev/null 2>&1
+    lockdown-wan "/root/vpn/$OVPN" >/dev/null 2>&1
     pgrep -x microsocks >/dev/null && echo "PROXY ALIVE" || echo "PROXY DIED"
     curl -m 8 -s -o /dev/null --socks5 "127.0.0.1:$SOCKS" http://10.129.1.1
     echo "relay-exit=$?"'
@@ -115,8 +122,8 @@ in_tunnel() {
   run in_tunnel '
     microsocks -i 0.0.0.0 -p "$SOCKS" >/tmp/microsocks.log 2>&1 &
     sleep 1
-    lockdown-wan /root/vpn/'"${CFG}"' >/dev/null 2>&1
-    curl -m 15 -s -o /dev/null --socks5 "127.0.0.1:$SOCKS" "http://'"${ICEPICK_LAB_TARGET}"'"
+    lockdown-wan "/root/vpn/$OVPN" >/dev/null 2>&1
+    curl -m 15 -s -o /dev/null --socks5 "127.0.0.1:$SOCKS" "http://$LAB"
     echo "relay-exit=$?"'
   assert_success
   assert_output --partial "relay-exit=0"
