@@ -53,12 +53,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # --- toolset ----------------------------------------------------------------
 # Only what kali-linux-headless does NOT pull in, measured by diffing its
-# dependencies: it ships no ProjectDiscovery tools and no debugger.
+# dependencies: it ships no ProjectDiscovery tools and no debugger. The last
+# line (autorecon/enum4linux-ng/feroxbuster + openvpn) is shared with the
+# autonomous overlay that builds FROM this image; openvpn also backs `deck vpn`.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends kali-linux-headless \
  && apt-get install -y --no-install-recommends \
-        netcat-openbsd iputils-ping dnsutils iptables microsocks \
+        netcat-openbsd iputils-ping dnsutils iptables microsocks openvpn \
         nuclei httpx-toolkit subfinder naabu dnsx assetfinder arjun \
+        autorecon enum4linux-ng feroxbuster \
         gdb gdbserver ltrace strace patchelf checksec python3-pwntools \
         foremost steghide uro name-that-hash \
  && rm -rf /var/lib/apt/lists/*
@@ -86,6 +89,37 @@ RUN git clone --depth 1 --quiet https://github.com/1ndianl33t/Gf-Patterns /tmp/g
  && cp /tmp/gfp/*.json /root/.gf/ \
  && cp /tmp/gf/examples/*.json /root/.gf/ \
  && rm -rf /tmp/gf /tmp/gfp
+
+# rustscan - not packaged by Kali/Debian and no upstream multiarch binary, so
+# build from source. cargo runs on arm64 and amd64 alike; copy the one binary
+# out and drop the ~1 GB toolchain in the SAME layer so it never ships.
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+      | sh -s -- -y --default-toolchain stable --profile minimal \
+ && /root/.cargo/bin/cargo install rustscan \
+ && cp /root/.cargo/bin/rustscan /usr/local/bin/rustscan \
+ && rustup self uninstall -y 2>/dev/null || true \
+ && rm -rf /root/.cargo /root/.rustup
+
+# Heavy Python exploit libs Kali does not package (angr, ROPgadget). Kept in a
+# dedicated venv, NOT system python: this image is PEP-668 externally-managed and
+# angr drags in pinned deps that would otherwise fight apt's python3-* packages.
+# --system-site-packages lets the venv still see the apt python3-pwntools, so a
+# single interpreter (/opt/pyenv/bin/python3) has the whole pwn+angr+ROPgadget
+# trio - matching how the autonomous image exposed them. CLIs are linked onto PATH.
+RUN python3 -m venv --system-site-packages /opt/pyenv \
+ && /opt/pyenv/bin/pip install --no-cache-dir --upgrade pip wheel setuptools \
+ && /opt/pyenv/bin/pip install --no-cache-dir angr ropgadget \
+ && ln -s /opt/pyenv/bin/ROPgadget /usr/local/bin/ROPgadget \
+ && printf '#!/bin/sh\nexec /opt/pyenv/bin/python3 "$@"\n' > /usr/local/bin/angr-python \
+ && chmod +x /usr/local/bin/angr-python
+
+# jwt_tool, exposed as `jwt-analyzer` (the name HexStrike's JWT probe calls). Its
+# deps live in the /opt/pyenv venv above to keep system python clean.
+RUN git clone --depth 1 https://github.com/ticarpi/jwt_tool.git /opt/jwt_tool \
+ && /opt/pyenv/bin/pip install --no-cache-dir pycryptodomex termcolor cryptography requests \
+ && printf '#!/bin/sh\nexec /opt/pyenv/bin/python3 /opt/jwt_tool/jwt_tool.py "$@"\n' \
+      > /usr/local/bin/jwt-analyzer \
+ && chmod +x /usr/local/bin/jwt-analyzer
 
 # --- Go tools from stage 1 --------------------------------------------------
 COPY --from=gotools /out/ /usr/local/bin/

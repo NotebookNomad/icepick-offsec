@@ -21,7 +21,23 @@ dcrun() { compose_run "$@"; }
 }
 
 @test "the toolset kali-linux-headless leaves out is installed" {
-  run dcrun deck sh -c 'command -v nuclei httpx subfinder naabu dnsx arjun gdb strace checksec microsocks'
+  run dcrun deck sh -c 'command -v nuclei httpx subfinder naabu dnsx arjun gdb strace checksec microsocks \
+                                   autorecon enum4linux-ng feroxbuster openvpn'
+  assert_success
+}
+
+@test "the source-built extras shared with the autonomous overlay are on PATH" {
+  # rustscan (cargo), jwt-analyzer (jwt_tool wrapper) and ROPgadget (venv) are
+  # not apt packages; the Dockerfile builds/wraps each. HexStrike calls them by
+  # these exact names, so a rename here would silently break the autonomous rig.
+  run dcrun deck sh -c 'command -v rustscan jwt-analyzer ROPgadget'
+  assert_success
+}
+
+@test "angr and ROPgadget are importable from the /opt/pyenv interpreter" {
+  # angr is not system python (PEP-668); it lives in /opt/pyenv, which is built
+  # --system-site-packages so pwntools is visible from the same interpreter.
+  run dcrun deck /opt/pyenv/bin/python3 -c 'import angr, ropgadget, pwn'
   assert_success
 }
 
