@@ -97,7 +97,6 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
       | sh -s -- -y --default-toolchain stable --profile minimal \
  && /root/.cargo/bin/cargo install rustscan \
  && cp /root/.cargo/bin/rustscan /usr/local/bin/rustscan \
- && rustup self uninstall -y 2>/dev/null || true \
  && rm -rf /root/.cargo /root/.rustup
 
 # Heavy Python exploit libs Kali does not package (angr, ROPgadget). Kept in a
