@@ -15,23 +15,31 @@ setup() { require_image; }
 # parallel set.
 dcrun() { compose_run "$@"; }
 
-@test "the 8 Go tools Kali does not package are on PATH" {
-  run dcrun deck sh -c 'command -v katana dalfox gau waybackurls anew unfurl qsreplace gf'
+# Assert every name is on PATH. A loop, not `command -v a b c`: /bin/sh here is
+# dash, whose `command -v` inspects only its FIRST argument and ignores the
+# rest, so the one-shot form passes green on a broken b and c. Same shape as the
+# scripts test further down, which got it right.
+assert_on_path() {
+  run dcrun deck sh -c 'for t in '"$*"'; do
+                          command -v "$t" >/dev/null || { echo "missing: $t"; exit 1; }
+                        done'
   assert_success
 }
 
+@test "the 8 Go tools Kali does not package are on PATH" {
+  assert_on_path katana dalfox gau waybackurls anew unfurl qsreplace gf
+}
+
 @test "the toolset kali-linux-headless leaves out is installed" {
-  run dcrun deck sh -c 'command -v nuclei httpx subfinder naabu dnsx arjun gdb strace checksec microsocks \
-                                   autorecon enum4linux-ng feroxbuster openvpn'
-  assert_success
+  assert_on_path nuclei httpx subfinder naabu dnsx arjun gdb strace checksec \
+                 microsocks autorecon enum4linux-ng feroxbuster openvpn
 }
 
 @test "the source-built extras shared with the autonomous overlay are on PATH" {
   # rustscan (cargo), jwt-analyzer (jwt_tool wrapper) and ROPgadget (venv) are
   # not apt packages; the Dockerfile builds/wraps each. HexStrike calls them by
   # these exact names, so a rename here would silently break the autonomous rig.
-  run dcrun deck sh -c 'command -v rustscan jwt-analyzer ROPgadget'
-  assert_success
+  assert_on_path rustscan jwt-analyzer ROPgadget
 }
 
 @test "angr and ROPgadget are importable from the /opt/pyenv interpreter" {
