@@ -15,23 +15,33 @@ setup() { require_image; }
 # parallel set.
 dcrun() { compose_run "$@"; }
 
-@test "the 8 Go tools Kali does not package are on PATH" {
-  run dcrun deck sh -c 'command -v katana dalfox gau waybackurls anew unfurl qsreplace gf'
+# Assert every name is on PATH. A loop, not `command -v a b c`: /bin/sh here is
+# dash, whose `command -v` inspects only its FIRST argument and ignores the
+# rest, so the one-shot form passes green on a broken b and c. Same shape as the
+# scripts test further down, which got it right.
+assert_on_path() {
+  run dcrun deck sh -c 'for t in '"$*"'; do
+                          command -v "$t" >/dev/null || { echo "missing: $t"; exit 1; }
+                        done'
   assert_success
+}
+
+@test "the 8 Go tools Kali does not package are on PATH" {
+  assert_on_path katana dalfox gau waybackurls anew unfurl qsreplace gf
 }
 
 @test "the toolset kali-linux-headless leaves out is installed" {
-  run dcrun deck sh -c 'command -v nuclei httpx subfinder naabu dnsx arjun gdb strace checksec microsocks \
-                                   autorecon enum4linux-ng feroxbuster openvpn'
-  assert_success
+  assert_on_path nuclei httpx subfinder naabu dnsx arjun gdb strace checksec \
+                 microsocks autorecon enum4linux-ng feroxbuster openvpn
 }
 
 @test "the source-built extras shared with the autonomous overlay are on PATH" {
-  # rustscan (cargo), jwt-analyzer (jwt_tool wrapper) and ROPgadget (venv) are
-  # not apt packages; the Dockerfile builds/wraps each. HexStrike calls them by
-  # these exact names, so a rename here would silently break the autonomous rig.
-  run dcrun deck sh -c 'command -v rustscan jwt-analyzer ROPgadget'
-  assert_success
+  # rustscan (cargo), jwt-analyzer (jwt_tool wrapper), ROPgadget and angr-python
+  # (both onto the /opt/pyenv venv) are not apt packages; the Dockerfile builds
+  # or wraps each. These are the exact names the autonomous overlay's probes
+  # invoke, so a rename here breaks it at *its* runtime rather than at this
+  # image's build - README, "This image is another image's base".
+  assert_on_path rustscan jwt-analyzer ROPgadget angr-python
 }
 
 @test "angr and ROPgadget are importable from the /opt/pyenv interpreter" {
@@ -105,6 +115,20 @@ dcrun() { compose_run "$@"; }
                           test -x "/usr/local/bin/$s" || { echo "missing: $s"; exit 1; }
                         done'
   assert_success
+}
+
+@test "a login shell starts clean, with no stray error before the banner" {
+  # rustup's installer appends `. "$HOME/.cargo/env"` to .zshenv, .profile and
+  # .bashrc, and the rustscan layer deletes ~/.cargo in the same RUN. Without
+  # --no-modify-path every shell - and every tmux pane, and the `deck vpn`
+  # handoff - opens with a "no such file or directory" for a file that is gone.
+  run dcrun deck zsh -lic 'true'
+  assert_success
+  refute_output --partial "cargo/env"
+
+  run dcrun deck bash -lc 'true'
+  assert_success
+  refute_output --partial "cargo/env"
 }
 
 @test "whereami reports the capability and the workspace mount" {

@@ -294,6 +294,14 @@ available from inside. Lab names keep working, because `/etc/hosts` is consulted
 first and `hosts add` already puts them there — but public names stop resolving,
 which is the point. `KEEP_DNS=1` skips it and warns.
 
+If a lab needs one more destination outside the tunnel — a jump host, a
+provider-side resolver you decided to keep — `LOCAL_ALLOW_NETS` is permitted
+alongside the bridge subnet:
+
+```bash
+LOCAL_ALLOW_NETS='192.0.2.10/32' lockdown-wan
+```
+
 Like `lockdown-lan`, the rules are per container and die with the session. And
 the same caveat applies to both: the container has `NET_ADMIN`, so anything
 running in it can flush these rules. This stops accidents, not hostile code.
@@ -394,14 +402,27 @@ means `GatewayPorts clientspecified` in the remote `sshd_config`, and then
 
 ## What's in it
 
-`kali-linux-headless` (1342 packages), plus 23 tools it leaves out, plus 8 built
-from source.
+`kali-linux-headless` (1342 packages), plus 27 packages it leaves out, plus 14
+tools that aren't packaged for Kali or Debian at all.
 
-The 23 are the measured gap, not a curation — headless ships no ProjectDiscovery
-tools (`nuclei`, `httpx`, `subfinder`, `naabu`, `dnsx`) and no debugger (`gdb`,
-`strace`, `checksec`, `pwntools`). `microsocks` is the one addition that isn't a
-gap: it backs `deck vpn --socks`. The 8 (`katana`, `dalfox`, `gau`,
-`waybackurls`, `anew`, `unfurl`, `qsreplace`, `gf`) aren't in Kali's repo at all.
+Most of the 27 are the measured gap, not a curation — headless ships no
+ProjectDiscovery tools (`nuclei`, `httpx`, `subfinder`, `naabu`, `dnsx`) and no
+debugger (`gdb`, `gdbserver`, `ltrace`, `strace`, `patchelf`, `checksec`,
+`pwntools`). The rest fill it out: recon and content discovery (`assetfinder`,
+`arjun`, `autorecon`, `enum4linux-ng`, `feroxbuster`), forensics and CTF
+miscellany (`foremost`, `steghide`, `uro`, `name-that-hash`), and the plumbing
+`deck` itself needs (`netcat-openbsd`, `iputils-ping`, `dnsutils`, `iptables`,
+`openvpn` for `deck vpn`, `microsocks` for `deck vpn --socks`).
+
+The 14 are built or wrapped in the Dockerfile. Eight are Go (`katana`,
+`dalfox`, `gau`, `waybackurls`, `anew`, `unfurl`, `qsreplace`, `gf`), compiled in
+a first stage so the toolchain never ships. `rustscan` is built with cargo,
+which is dropped in the same layer for the same reason — there is no upstream
+multiarch binary. `one_gadget` and `seccomp-tools` are gems. `angr` and
+`ROPgadget` live in a venv at `/opt/pyenv`, kept off PEP-668 system python but
+built `--system-site-packages` so the apt `pwntools` is visible from the same
+interpreter; run them with `angr-python` and `ROPgadget`. `jwt_tool` is wrapped
+as `jwt-analyzer`.
 
 `gf` has 37 patterns baked in — tomnomnom's examples for grepping responses,
 plus `1ndianl33t/Gf-Patterns` for vulnerable URL params (`ssrf`, `xss`, `sqli`,
@@ -474,6 +495,42 @@ that's the capability nearly every container escape needs. `no-new-privileges`
 and the default seccomp profile are on. How much an escape would cost you does
 depend on the host, though: under Docker Desktop it lands in Docker's Linux VM,
 while on a Linux Docker host it lands on the host kernel itself.
+
+## This image is another image's base
+
+Nothing here runs an agent. There is no MCP server, no agent runtime, no exposed
+port — `CMD` is a login shell and `./deck` is how you drive it. That is on
+purpose: a second repo, `icepick-offsec-autonomous`, builds `FROM` this image
+and adds the agent layer (HexStrike AI's MCP server) on top. This one stays
+tool-only.
+
+The cost of that split is a contract you can't see from the Dockerfile alone.
+Some of what this image exposes is named for what HexStrike's probes invoke
+rather than for what the tool calls itself, so a rename that looks like tidying
+here breaks the overlay — and breaks it at *its* runtime, not at this image's
+build, which is the worst place to find out.
+
+**Load-bearing, and not obviously so:**
+
+1. **The tag.** `icepick-offsec:latest`, in `docker-compose.yml`, is the string
+   the overlay's `FROM` names.
+2. **Five binaries, by exact name on `PATH`.** `jwt-analyzer` is the one to
+   watch — it's `jwt_tool`, and the name shares nothing with the project's own,
+   so it reads like a mistake. The others are `angr-python`, `ROPgadget`,
+   `rustscan`, and `httpx` (a symlink to Kali's `httpx-toolkit`, because
+   `python3-httpx` owns `/usr/bin/httpx`).
+3. **One interpreter for the pwn trio.** `/opt/pyenv/bin/python3` has to keep
+   `pwn`, `angr` and `ropgadget` importable together — that's the whole reason
+   the venv is built `--system-site-packages`. Splitting them breaks the overlay
+   even if every name above survives.
+4. **Four apt tools it shares**: `autorecon`, `enum4linux-ng`, `feroxbuster`,
+   and `openvpn` — which also backs `deck vpn`, so only that last one has a
+   second reason to stay.
+
+`tests/integration/image.bats` guards the names. It isn't run in CI — the layer
+needs the ~10 GB image — so it's a local gate: `./deck build`, then
+`./tests/run.sh integration`. See [What's in it](#whats-in-it) for what these
+tools actually are.
 
 ## Limits
 

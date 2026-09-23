@@ -2,6 +2,10 @@
 # deck - driver for the toolkit. Thin wrapper over docker compose.
 set -euo pipefail
 
+# Where the caller typed the command, kept before the cd below: a relative
+# path they pass has to resolve against their directory, not the repo's.
+INVOKED_FROM="$PWD"
+
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
 DC=(docker compose)
@@ -24,6 +28,13 @@ pick_vpn() {
     if [ -f "$VPN_DIR/$given" ]; then
       base="$given"
     else
+      # deck cd'd to the repo on startup, so a relative path is relative to the
+      # wrong directory by the time it gets here - and `deck vpn ./lab.ovpn`
+      # from ~/Downloads would report "no such file" about a file plainly there.
+      case "$given" in
+        /*) ;;
+        *)  [ ! -f "$INVOKED_FROM/$given" ] || given="$INVOKED_FROM/$given" ;;
+      esac
       [ -f "$given" ] || { echo "no such file: $given" >&2; return 1; }
       base="$(basename "$given")"
       # Copy it in rather than mounting a second path: one read-only mount is
@@ -214,7 +225,10 @@ case "${1:-}" in
                  [[ "${2:-}" =~ ^[0-9]+$ ]] && { socks="$2"; shift; } ;;
         --lockdown) lockdown=1 ;;
         -*)      echo "unknown option: $1" >&2; exit 1 ;;
-        *)       cfg="$1" ;;
+        # Two configs is a typo, not a request. Taking the last one silently
+        # connects to a lab you did not name.
+        *)       [ -z "$cfg" ] || { echo "one config at a time - got $cfg and $1" >&2; exit 1; }
+                 cfg="$1" ;;
       esac
       shift
     done

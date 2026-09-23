@@ -53,9 +53,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # --- toolset ----------------------------------------------------------------
 # Only what kali-linux-headless does NOT pull in, measured by diffing its
-# dependencies: it ships no ProjectDiscovery tools and no debugger. The last
-# line (autorecon/enum4linux-ng/feroxbuster + openvpn) is shared with the
-# autonomous overlay that builds FROM this image; openvpn also backs `deck vpn`.
+# dependencies: it ships no ProjectDiscovery tools and no debugger. The
+# autorecon/enum4linux-ng/feroxbuster line, and openvpn above it, are also what
+# the autonomous overlay that builds FROM this image expects to find - see the
+# README, "This image is another image's base". openvpn additionally backs
+# `deck vpn`, so it is the one with a second reason to stay.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends kali-linux-headless \
  && apt-get install -y --no-install-recommends \
@@ -72,7 +74,7 @@ RUN apt-get update \
 RUN test -x /usr/bin/httpx-toolkit \
  && ln -s /usr/bin/httpx-toolkit /usr/local/bin/httpx
 
-# The only two tools not packaged by Kali or Debian.
+# The two Ruby CTF tools Kali does not package.
 RUN gem install --no-document one_gadget seccomp-tools
 
 # GEF loads from gdb's system-wide init. mkdir first: /etc/gdb exists only if
@@ -93,8 +95,13 @@ RUN git clone --depth 1 --quiet https://github.com/1ndianl33t/Gf-Patterns /tmp/g
 # rustscan - not packaged by Kali/Debian and no upstream multiarch binary, so
 # build from source. cargo runs on arm64 and amd64 alike; copy the one binary
 # out and drop the ~1 GB toolchain in the SAME layer so it never ships.
+#
+# --no-modify-path is load-bearing, not tidiness: without it rustup appends
+# `. "$HOME/.cargo/env"` to .zshenv, .profile and .bashrc, and the rm below
+# takes ~/.cargo away in this same layer. Every zsh then opens - banner, tmux
+# pane, `deck vpn` handoff - with a "no such file or directory" for it.
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-      | sh -s -- -y --default-toolchain stable --profile minimal \
+      | sh -s -- -y --default-toolchain stable --profile minimal --no-modify-path \
  && /root/.cargo/bin/cargo install rustscan \
  && cp /root/.cargo/bin/rustscan /usr/local/bin/rustscan \
  && rm -rf /root/.cargo /root/.rustup
@@ -104,7 +111,9 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
 # angr drags in pinned deps that would otherwise fight apt's python3-* packages.
 # --system-site-packages lets the venv still see the apt python3-pwntools, so a
 # single interpreter (/opt/pyenv/bin/python3) has the whole pwn+angr+ROPgadget
-# trio - matching how the autonomous image exposed them. CLIs are linked onto PATH.
+# trio. The overlay that builds FROM this image relies on that - splitting the
+# three across interpreters breaks it even if the CLI names below survive. The
+# CLIs go onto PATH as ROPgadget and angr-python, which are the names it calls.
 RUN python3 -m venv --system-site-packages /opt/pyenv \
  && /opt/pyenv/bin/pip install --no-cache-dir --upgrade pip wheel setuptools \
  && /opt/pyenv/bin/pip install --no-cache-dir angr ropgadget \
@@ -112,7 +121,9 @@ RUN python3 -m venv --system-site-packages /opt/pyenv \
  && printf '#!/bin/sh\nexec /opt/pyenv/bin/python3 "$@"\n' > /usr/local/bin/angr-python \
  && chmod +x /usr/local/bin/angr-python
 
-# jwt_tool, exposed as `jwt-analyzer` (the name HexStrike's JWT probe calls). Its
+# jwt_tool, exposed as `jwt-analyzer`. The name shares nothing with the project's
+# own, so it looks like a slip: it is the name the autonomous overlay's JWT probe
+# invokes, and README "This image is another image's base" lists the rest. Its
 # deps live in the /opt/pyenv venv above to keep system python clean.
 RUN git clone --depth 1 https://github.com/ticarpi/jwt_tool.git /opt/jwt_tool \
  && /opt/pyenv/bin/pip install --no-cache-dir pycryptodomex termcolor cryptography requests \

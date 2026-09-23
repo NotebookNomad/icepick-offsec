@@ -186,3 +186,32 @@ menu() {
   assert_output --partial "is a symlink"
   refute_called '^docker '
 }
+
+@test "a relative path resolves against the caller's directory, not the repo's" {
+  # deck cd's to its own directory on startup, so a path typed relative to
+  # somewhere else used to come back "no such file" about a file plainly there.
+  mkdir -p "$BATS_TEST_TMPDIR/downloads"
+  cp "$(fixture ovpn/cert-only.ovpn)" "$BATS_TEST_TMPDIR/downloads/lab.ovpn"
+  cd "$BATS_TEST_TMPDIR/downloads"
+  run "$DECK" vpn ./lab.ovpn
+  assert_success
+  assert_called 'OVPN=lab\.ovpn'
+  [ -f "$(dirname "$DECK")/vpn/lab.ovpn" ]
+}
+
+@test "a relative path that really is missing still reports itself verbatim" {
+  cd "$BATS_TEST_TMPDIR"
+  run "$DECK" vpn ./nope.ovpn
+  assert_failure
+  assert_output --partial "no such file: ./nope.ovpn"
+  refute_called '^docker '
+}
+
+@test "two configs at once is refused rather than silently taking the last" {
+  drop cert-only.ovpn lab.ovpn
+  drop auth-user-pass.ovpn htb.ovpn
+  run "$DECK" vpn lab.ovpn htb.ovpn
+  assert_failure
+  assert_output --partial "one config at a time"
+  refute_called '^docker '
+}
