@@ -36,10 +36,12 @@ assert_on_path() {
 }
 
 @test "the source-built extras shared with the autonomous overlay are on PATH" {
-  # rustscan (cargo), jwt-analyzer (jwt_tool wrapper) and ROPgadget (venv) are
-  # not apt packages; the Dockerfile builds/wraps each. HexStrike calls them by
-  # these exact names, so a rename here would silently break the autonomous rig.
-  assert_on_path rustscan jwt-analyzer ROPgadget
+  # rustscan (cargo), jwt-analyzer (jwt_tool wrapper), ROPgadget and angr-python
+  # (both onto the /opt/pyenv venv) are not apt packages; the Dockerfile builds
+  # or wraps each. These are the exact names the autonomous overlay's probes
+  # invoke, so a rename here breaks it at *its* runtime rather than at this
+  # image's build - README, "This image is another image's base".
+  assert_on_path rustscan jwt-analyzer ROPgadget angr-python
 }
 
 @test "angr and ROPgadget are importable from the /opt/pyenv interpreter" {

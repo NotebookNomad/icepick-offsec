@@ -496,6 +496,42 @@ and the default seccomp profile are on. How much an escape would cost you does
 depend on the host, though: under Docker Desktop it lands in Docker's Linux VM,
 while on a Linux Docker host it lands on the host kernel itself.
 
+## This image is another image's base
+
+Nothing here runs an agent. There is no MCP server, no agent runtime, no exposed
+port — `CMD` is a login shell and `./deck` is how you drive it. That is on
+purpose: a second repo, `icepick-offsec-autonomous`, builds `FROM` this image
+and adds the agent layer (HexStrike AI's MCP server) on top. This one stays
+tool-only.
+
+The cost of that split is a contract you can't see from the Dockerfile alone.
+Some of what this image exposes is named for what HexStrike's probes invoke
+rather than for what the tool calls itself, so a rename that looks like tidying
+here breaks the overlay — and breaks it at *its* runtime, not at this image's
+build, which is the worst place to find out.
+
+**Load-bearing, and not obviously so:**
+
+1. **The tag.** `icepick-offsec:latest`, in `docker-compose.yml`, is the string
+   the overlay's `FROM` names.
+2. **Five binaries, by exact name on `PATH`.** `jwt-analyzer` is the one to
+   watch — it's `jwt_tool`, and the name shares nothing with the project's own,
+   so it reads like a mistake. The others are `angr-python`, `ROPgadget`,
+   `rustscan`, and `httpx` (a symlink to Kali's `httpx-toolkit`, because
+   `python3-httpx` owns `/usr/bin/httpx`).
+3. **One interpreter for the pwn trio.** `/opt/pyenv/bin/python3` has to keep
+   `pwn`, `angr` and `ropgadget` importable together — that's the whole reason
+   the venv is built `--system-site-packages`. Splitting them breaks the overlay
+   even if every name above survives.
+4. **Four apt tools it shares**: `autorecon`, `enum4linux-ng`, `feroxbuster`,
+   and `openvpn` — which also backs `deck vpn`, so only that last one has a
+   second reason to stay.
+
+`tests/integration/image.bats` guards the names. It isn't run in CI — the layer
+needs the ~10 GB image — so it's a local gate: `./deck build`, then
+`./tests/run.sh integration`. See [What's in it](#whats-in-it) for what these
+tools actually are.
+
 ## Limits
 
 - **A container is not a VM.** It stops accidents and ordinary malware, not a
