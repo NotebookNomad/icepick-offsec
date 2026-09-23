@@ -107,6 +107,20 @@ dcrun() { compose_run "$@"; }
   assert_success
 }
 
+@test "a login shell starts clean, with no stray error before the banner" {
+  # rustup's installer appends `. "$HOME/.cargo/env"` to .zshenv, .profile and
+  # .bashrc, and the rustscan layer deletes ~/.cargo in the same RUN. Without
+  # --no-modify-path every shell - and every tmux pane, and the `deck vpn`
+  # handoff - opens with a "no such file or directory" for a file that is gone.
+  run dcrun deck zsh -lic 'true'
+  assert_success
+  refute_output --partial "cargo/env"
+
+  run dcrun deck bash -lc 'true'
+  assert_success
+  refute_output --partial "cargo/env"
+}
+
 @test "whereami reports the capability and the workspace mount" {
   run dcrun deck zsh -lic 'whereami'
   assert_success

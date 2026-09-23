@@ -93,8 +93,13 @@ RUN git clone --depth 1 --quiet https://github.com/1ndianl33t/Gf-Patterns /tmp/g
 # rustscan - not packaged by Kali/Debian and no upstream multiarch binary, so
 # build from source. cargo runs on arm64 and amd64 alike; copy the one binary
 # out and drop the ~1 GB toolchain in the SAME layer so it never ships.
+#
+# --no-modify-path is load-bearing, not tidiness: without it rustup appends
+# `. "$HOME/.cargo/env"` to .zshenv, .profile and .bashrc, and the rm below
+# takes ~/.cargo away in this same layer. Every zsh then opens - banner, tmux
+# pane, `deck vpn` handoff - with a "no such file or directory" for it.
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-      | sh -s -- -y --default-toolchain stable --profile minimal \
+      | sh -s -- -y --default-toolchain stable --profile minimal --no-modify-path \
  && /root/.cargo/bin/cargo install rustscan \
  && cp /root/.cargo/bin/rustscan /usr/local/bin/rustscan \
  && rm -rf /root/.cargo /root/.rustup
