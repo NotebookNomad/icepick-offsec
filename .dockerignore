@@ -7,3 +7,10 @@ workspace/
 *.key
 .git/
 README.md
+# The whole directory, not just *.ovpn: an openvpn config is routinely paired
+# with an auth-user-pass file under some other name, and nothing in here is
+# COPY'd into the image anyway.
+vpn/
+# Nothing here is COPY'd either, and the bats submodules are the bulk of the
+# context otherwise.
+tests/

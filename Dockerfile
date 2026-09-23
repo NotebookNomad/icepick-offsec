@@ -53,9 +53,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # --- toolset ----------------------------------------------------------------
 # Only what kali-linux-headless does NOT pull in, measured by diffing its
-# dependencies: it ships no ProjectDiscovery tools and no debugger. The last
-# line (autorecon/enum4linux-ng/feroxbuster + openvpn) is shared with the
-# autonomous overlay that builds FROM this image; openvpn also backs `deck vpn`.
+# dependencies: it ships no ProjectDiscovery tools and no debugger. The
+# autorecon/enum4linux-ng/feroxbuster line, and openvpn above it, are shared
+# with the autonomous overlay that builds FROM this image; openvpn also backs
+# `deck vpn`.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends kali-linux-headless \
  && apt-get install -y --no-install-recommends \
@@ -72,7 +73,7 @@ RUN apt-get update \
 RUN test -x /usr/bin/httpx-toolkit \
  && ln -s /usr/bin/httpx-toolkit /usr/local/bin/httpx
 
-# The only two tools not packaged by Kali or Debian.
+# The two Ruby CTF tools Kali does not package.
 RUN gem install --no-document one_gadget seccomp-tools
 
 # GEF loads from gdb's system-wide init. mkdir first: /etc/gdb exists only if

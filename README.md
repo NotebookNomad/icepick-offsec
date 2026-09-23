@@ -294,6 +294,14 @@ available from inside. Lab names keep working, because `/etc/hosts` is consulted
 first and `hosts add` already puts them there — but public names stop resolving,
 which is the point. `KEEP_DNS=1` skips it and warns.
 
+If a lab needs one more destination outside the tunnel — a jump host, a
+provider-side resolver you decided to keep — `LOCAL_ALLOW_NETS` is permitted
+alongside the bridge subnet:
+
+```bash
+LOCAL_ALLOW_NETS='192.0.2.10/32' lockdown-wan
+```
+
 Like `lockdown-lan`, the rules are per container and die with the session. And
 the same caveat applies to both: the container has `NET_ADMIN`, so anything
 running in it can flush these rules. This stops accidents, not hostile code.
@@ -394,14 +402,27 @@ means `GatewayPorts clientspecified` in the remote `sshd_config`, and then
 
 ## What's in it
 
-`kali-linux-headless` (1342 packages), plus 23 tools it leaves out, plus 8 built
-from source.
+`kali-linux-headless` (1342 packages), plus 27 packages it leaves out, plus 14
+tools that aren't packaged for Kali or Debian at all.
 
-The 23 are the measured gap, not a curation — headless ships no ProjectDiscovery
-tools (`nuclei`, `httpx`, `subfinder`, `naabu`, `dnsx`) and no debugger (`gdb`,
-`strace`, `checksec`, `pwntools`). `microsocks` is the one addition that isn't a
-gap: it backs `deck vpn --socks`. The 8 (`katana`, `dalfox`, `gau`,
-`waybackurls`, `anew`, `unfurl`, `qsreplace`, `gf`) aren't in Kali's repo at all.
+Most of the 27 are the measured gap, not a curation — headless ships no
+ProjectDiscovery tools (`nuclei`, `httpx`, `subfinder`, `naabu`, `dnsx`) and no
+debugger (`gdb`, `gdbserver`, `ltrace`, `strace`, `patchelf`, `checksec`,
+`pwntools`). The rest fill it out: recon and content discovery (`assetfinder`,
+`arjun`, `autorecon`, `enum4linux-ng`, `feroxbuster`), forensics and CTF
+miscellany (`foremost`, `steghide`, `uro`, `name-that-hash`), and the plumbing
+`deck` itself needs (`netcat-openbsd`, `iputils-ping`, `dnsutils`, `iptables`,
+`openvpn` for `deck vpn`, `microsocks` for `deck vpn --socks`).
+
+The 14 are built or wrapped in the Dockerfile. Eight are Go (`katana`,
+`dalfox`, `gau`, `waybackurls`, `anew`, `unfurl`, `qsreplace`, `gf`), compiled in
+a first stage so the toolchain never ships. `rustscan` is built with cargo,
+which is dropped in the same layer for the same reason — there is no upstream
+multiarch binary. `one_gadget` and `seccomp-tools` are gems. `angr` and
+`ROPgadget` live in a venv at `/opt/pyenv`, kept off PEP-668 system python but
+built `--system-site-packages` so the apt `pwntools` is visible from the same
+interpreter; run them with `angr-python` and `ROPgadget`. `jwt_tool` is wrapped
+as `jwt-analyzer`.
 
 `gf` has 37 patterns baked in — tomnomnom's examples for grepping responses,
 plus `1ndianl33t/Gf-Patterns` for vulnerable URL params (`ssrf`, `xss`, `sqli`,
