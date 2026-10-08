@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Work out which of the host's addresses a reverse-shell callback should aim at.
+# Called by `deck listen`, and prints three things on stdout:
+#   line 1   the best guess (or "<your-host-IP>" when nothing could be found)
+#   line 2   a parenthesised note on how that guess was reached
+#   line 3+  every other local address worth trying, one per line
+#
+# This runs on the HOST, not in the container: it reads the host's own
+# interfaces to find where a target out on the internet - or on a lab VPN - can
+# reach it. deck is the only caller; it lives in scripts/ so the static suite
+# lints it with the rest.
+set -euo pipefail
+
+# The address on the default route is the usual place a callback lands, but it
+# is only a guess: behind cloud NAT (AWS/GCE/Azure) the public IP never appears
+# locally, and a host firewalled to a VPN/tailnet is reachable only on that
+# interface. So return it as the guess and list every other local IPv4 too.
+# macOS ships no `ip`, Linux no `ipconfig`, so ask whichever is here.
+#
+# Every lookup ends in `|| true`. A bare assignment takes its command's status,
+# and under `set -e` + `pipefail` a host with no default route - or no `ip` at
+# all - would abort here rather than fall through to the placeholder below.
+addr="" addrs=""
+case "$(uname -s)" in
+  Darwin)
+    iface=$(route get default 2>/dev/null | awk '/interface:/{print $2}') || true
+    addr=$(ipconfig getifaddr "${iface:-en0}" 2>/dev/null || true)
+    # Drop what a target can never call back to. Track the interface name across
+    # ifconfig's indented blocks so bridge/vmnet (Docker Desktop, UTM, VMware,
+    # Parallels) can be dropped by name, and skip self-assigned 169.254
+    # addresses. utun stays - that is where a real VPN or tailnet address lives.
+    addrs=$(ifconfig 2>/dev/null |
+            awk '/^[a-z][a-z0-9]*:/ { iface = $1; sub(/:$/, "", iface) }
+                 /[ \t]inet / && iface !~ /^(lo|bridge|vmnet|vmenet|awdl|llw)/ &&
+                 $2 !~ /^(127\.|169\.254\.)/ { print $2 }') || true ;;
+  *)
+    # A route lookup, not `hostname -I`: it picks the one source address that
+    # egress actually uses on a multi-homed box.
+    addr=$(ip route get 1.1.1.1 2>/dev/null |
+           awk '{ for (i = 1; i < NF; i++) if ($i == "src") { print $(i+1); exit } }') || true
+    # Every global IPv4, minus docker/bridge/veth - those reach nothing off-host.
+    addrs=$(ip -o -4 addr show scope global 2>/dev/null |
+            awk '$2 !~ /^(docker|br-|veth|virbr|cni)/ && $4 !~ /^169\.254\./ { print $4 }' |
+            cut -d/ -f1) || true ;;
+esac
+
+# Where the default-route lookup found nothing, promote the first real address
+# rather than labelling a found-nothing placeholder "host default route".
+why="(host default route)"
+if [ -z "$addr" ]; then
+  addr=$(printf '%s\n' $addrs | head -1)
+  why="(no default route - first local address)"
+fi
+if [ -z "$addr" ]; then
+  addr='<your-host-IP>'
+  why="(could not detect one)"
+fi
+
+printf '%s\n%s\n' "$addr" "$why"
+# The others, in the order found, with the chosen address removed.
+for a in $addrs; do
+  [ "$a" = "$addr" ] || printf '%s\n' "$a"
+done

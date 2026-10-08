@@ -5,20 +5,12 @@
 # a VPS. Needs NET_ADMIN; rules are per container.
 set -euo pipefail
 
-# Decode CapEff from /proc, not `capsh --print`: its "Current IAB" line prints
-# !cap_net_admin when absent, and a plain grep matches that negated entry.
-eff=$(capsh --decode="$(awk '/^CapEff/{print $2}' /proc/self/status)" 2>/dev/null)
-if ! printf '%s' "$eff" | grep -q net_admin; then
-  echo "error: needs NET_ADMIN - check cap_add in docker-compose.yml." >&2
-  exit 1
-fi
-
-# Same preflight as lockdown-wan: claiming the LAN is blocked when no rule could
-# be written is the one failure mode that matters here.
-if ! iptables -L >/dev/null 2>&1; then
-  echo "error: iptables unavailable - refusing to claim the LAN is blocked." >&2
-  exit 1
-fi
+# Fail-closed preflight, shared with lockdown-wan: NET_ADMIN to write rules, and
+# a writable iptables so we never claim the LAN is blocked when nothing was.
+# shellcheck source-path=SCRIPTDIR
+. lockdown-common.sh
+require_net_admin
+require_iptables "the LAN is blocked"
 
 PRIVATE_RANGES=(
   10.0.0.0/8
