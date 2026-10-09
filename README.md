@@ -19,9 +19,10 @@ packages smeared across your daily driver. The name nods to cyberpunk ICE
 
 **Why this over `docker run kalilinux/kali-rolling`?** That gives you a bare
 rolling image and a blank prompt. This adds the tools headless Kali leaves out,
-the one-command VPN / proxy / lockdown flow above, fail-closed egress firewalls
-so a mistyped target can't leave the tunnel, and a test suite that keeps it all
-honest — see [Going deeper](#going-deeper).
+the one-command VPN / proxy flow above, optional egress firewalls, and a test
+suite that keeps it all honest. Add `--lockdown` to keep traffic inside the VPN:
+`./deck vpn --socks --lockdown`. The `--socks` option alone does not enable the
+firewall. See [Going deeper](#going-deeper).
 
 > **New to this?** Read the four points below, run the
 > [Getting started](#getting-started) commands, then follow
@@ -55,11 +56,11 @@ work, since the container is Linux either way, but it's untested.) You can also
 run it on a server and drive it from a laptop or tablet — see
 [Running it on a remote host](docs/networking.md#running-it-on-a-remote-host).
 
-Two host details occasionally matter — VPN support needs `/dev/net/tun` (any
-Docker Desktop or ordinary Linux box has it; container-based VPSes like OpenVZ
-don't), and CPU architecture decides whether CTF binary-exploitation tools can
-run the x86-64 binaries most pwn challenges ship. Both are covered in
-[internals](docs/internals.md).
+Two host details occasionally matter — this Compose setup needs `/dev/net/tun`
+even for a plain shell (container-based VPSes may not expose it), and CPU
+architecture decides whether CTF binary-exploitation tools can run the x86-64
+binaries most pwn challenges ship. Both are covered in
+[host requirements](docs/internals.md#host-requirements-vpn-support-and-cpu-architecture).
 
 ## Getting started
 

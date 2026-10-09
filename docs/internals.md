@@ -110,6 +110,24 @@ build, which is the worst place to find out.
 needs the ~10 GB image — so it's a local gate: `./deck build`, then
 `./tests/run.sh integration`.
 
+## Host requirements: VPN support and CPU architecture
+
+**The Docker host must expose `/dev/net/tun`.** Compose maps this device into
+every session, so if it is absent even `./deck shell` cannot start. Docker
+Desktop provides it inside its Linux VM; on a Linux Docker host, check with
+`ls -l /dev/net/tun`. Ordinary Linux machines and full-virtualisation VPSes
+(KVM, Xen) generally support it. Container-based VPSes (OpenVZ, LXC) may not
+expose it — confirm TUN and Docker support with the provider before choosing
+one. Changing a setting inside this image cannot supply a missing host device.
+
+**The CTF binary tools run for the image's native architecture.** On an
+Intel/AMD host, `gdb`/GEF, `pwntools`, `one_gadget` and `checksec` work with the
+x86-64 binaries most pwn challenges ship. A native Apple Silicon build is
+ARM64: installing those tools does not make x86-64 challenge binaries runnable.
+The image does not include `qemu-user` emulation; use an x86-64 environment for
+those challenges or arrange emulation separately. Web and recon tooling works
+on either architecture.
+
 ## Limits
 
 - **A container is not a VM.** It stops accidents and ordinary malware, not a
