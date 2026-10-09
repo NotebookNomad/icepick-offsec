@@ -55,8 +55,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Only what kali-linux-headless does NOT pull in, measured by diffing its
 # dependencies: it ships no ProjectDiscovery tools and no debugger. The
 # autorecon/enum4linux-ng/feroxbuster line, and openvpn above it, are also what
-# the autonomous overlay that builds FROM this image expects to find - see the
-# README, "This image is another image's base". openvpn additionally backs
+# the autonomous overlay that builds FROM this image expects to find - see
+# docs/internals.md, "This image is another image's base". openvpn additionally backs
 # `deck vpn`, so it is the one with a second reason to stay.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends kali-linux-headless \
@@ -106,14 +106,12 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
  && cp /root/.cargo/bin/rustscan /usr/local/bin/rustscan \
  && rm -rf /root/.cargo /root/.rustup
 
-# Heavy Python exploit libs Kali does not package (angr, ROPgadget). Kept in a
-# dedicated venv, NOT system python: this image is PEP-668 externally-managed and
-# angr drags in pinned deps that would otherwise fight apt's python3-* packages.
-# --system-site-packages lets the venv still see the apt python3-pwntools, so a
-# single interpreter (/opt/pyenv/bin/python3) has the whole pwn+angr+ROPgadget
-# trio. The overlay that builds FROM this image relies on that - splitting the
-# three across interpreters breaks it even if the CLI names below survive. The
-# CLIs go onto PATH as ROPgadget and angr-python, which are the names it calls.
+# Heavy Python exploit libs Kali does not package (angr, ROPgadget). A dedicated
+# venv, NOT system python (PEP-668), but built --system-site-packages so one
+# interpreter (/opt/pyenv/bin/python3) keeps the whole pwn+angr+ROPgadget trio
+# importable together. Do NOT split them across interpreters: the overlay relies
+# on this, and on the CLI names ROPgadget and angr-python - see docs/internals.md
+# "This image is another image's base".
 RUN python3 -m venv --system-site-packages /opt/pyenv \
  && /opt/pyenv/bin/pip install --no-cache-dir --upgrade pip wheel setuptools \
  && /opt/pyenv/bin/pip install --no-cache-dir angr ropgadget \
@@ -123,7 +121,7 @@ RUN python3 -m venv --system-site-packages /opt/pyenv \
 
 # jwt_tool, exposed as `jwt-analyzer`. The name shares nothing with the project's
 # own, so it looks like a slip: it is the name the autonomous overlay's JWT probe
-# invokes, and README "This image is another image's base" lists the rest. Its
+# invokes, and docs/internals.md "This image is another image's base" lists the rest. Its
 # deps live in the /opt/pyenv venv above to keep system python clean.
 RUN git clone --depth 1 https://github.com/ticarpi/jwt_tool.git /opt/jwt_tool \
  && /opt/pyenv/bin/pip install --no-cache-dir pycryptodomex termcolor cryptography requests \
@@ -138,9 +136,10 @@ COPY --from=gotools /out/ /usr/local/bin/
 # Last, so editing one of these does not rebuild anything above it.
 COPY config/zshrc     /root/.zshrc
 COPY config/tmux.conf /root/.tmux.conf
-# The whole directory, not four named files: adding a script should be one new
-# file, not an edit here as well. tests/static/*.bats glob scripts/* for the
-# same reason, and tests/integration/image.bats checks what landed.
+# The whole directory, not a list of named files: adding a script should be one
+# new file, not an edit here as well. tests/static/*.bats glob scripts/* for the
+# same reason, and tests/integration/image.bats checks what landed. (callback-addr
+# is host-only - deck calls it - but rides along harmlessly and gets linted too.)
 COPY scripts/ /usr/local/bin/
 
 WORKDIR /root/workspace

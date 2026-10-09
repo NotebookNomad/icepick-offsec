@@ -148,14 +148,10 @@ _lab_hosts_load() {
   local keep=/tmp/hosts.$$
   awk -v m="$_LAB_MARK" 'index($0, m) == 1 { exit } { print }' /etc/hosts > "$keep"
 
-  # Last mention of a name wins. A room hands you a new IP every time you start
-  # it, so hosts.thm accumulates - resolving that here rather than at `hosts
-  # add` time means the file stays append-only (nothing you hand-edit into it
-  # can be destroyed) and `hosts load` and shell startup get the same treatment.
-  # Walking backwards and keeping the first sighting of each name is one pass,
-  # and it keeps a sibling vhost alive when a later line re-points only one of
-  # the names on its line. Lowercased because resolution is case-insensitive;
-  # \r stripped because hosts.thm gets edited from the host side.
+  # Last mention of a name wins: walk the lines backwards, keep the first
+  # sighting of each name. One pass, the file stays append-only, and a sibling
+  # vhost survives a later line re-pointing only one of its names. See
+  # docs/internals.md "lab hosts resolve last-mention-wins".
   { cat "$keep"
     echo "$_LAB_MARK"
     awk '{ sub(/\r$/, ""); line[NR] = $0 }

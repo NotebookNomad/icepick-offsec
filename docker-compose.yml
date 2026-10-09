@@ -1,7 +1,7 @@
 # Runs as root with Docker's default capability set, like every Kali image.
 # Isolation here is: no host filesystem beyond ./workspace, no docker socket,
 # own network, resource caps. Dropping capabilities breaks nmap and root's own
-# volume writes - see the README before trying it.
+# volume writes - see docs/internals.md before trying it.
 #
 # Nothing here is arch-specific: the image builds native on arm64 and amd64.
 

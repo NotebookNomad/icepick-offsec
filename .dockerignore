@@ -7,6 +7,8 @@ workspace/
 *.key
 .git/
 README.md
+# Docs are for humans, never COPY'd into the image.
+docs/
 # The whole directory, not just *.ovpn: an openvpn config is routinely paired
 # with an auth-user-pass file under some other name, and nothing in here is
 # COPY'd into the image anyway.

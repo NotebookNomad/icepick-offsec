@@ -1,8 +1,9 @@
 # tests
 
-`bats` suites for `deck` and the container-side scripts. The unit layer runs the
-real scripts against fake `docker`/`ip`/`openvpn`/… so there is **no Docker, no
-root, and no network** involved — it finishes in a couple of seconds.
+`bats` suites for `deck` and the container-side scripts. The static and unit
+layers use fake `docker`/`ip`/`openvpn`/… so there is **no Docker, no root, and
+no network** — they finish in a couple of seconds. The integration layer needs a
+built image.
 
 ## Running
 
@@ -16,87 +17,56 @@ git submodule update --init --recursive   # once: bats + bats-assert + bats-supp
 ```
 
 CI runs `static unit` on every PR (`.github/workflows/tests.yml`). It does not
-run `integration`: that layer needs the ~10 GB image, which is not something a
-GitHub runner should build on every push. Run it locally after `./deck build`.
+run `integration`: that layer needs the ~10 GB image, which a GitHub runner
+shouldn't build on every push. Run it locally after `./deck build`.
 
 ## Layout
 
 | dir | needs | what it checks |
 | --- | --- | --- |
 | `static/` | `shellcheck`, `zsh`, `docker` (each skipped if absent) | `bash -n` / `zsh -n` on every script; `shellcheck -x --severity=warning`; `docker compose config` validates and still declares `NET_ADMIN` + `/dev/net/tun` |
-| `integration/` | `docker` + a built `icepick-offsec:latest`, and for `vpn.bats` a real config in `vpn/` (each skipped if absent) | the image's contents (the Go tools, the headless gap, the `httpx` symlink, gf's patterns, GEF, the pwn toolchain), that `nmap` execs at all under its file capabilities, that `NET_ADMIN` and `/dev/net/tun` reach a running container, and both firewall scripts against real iptables |
-| `unit/` | nothing but `bash` | `deck listen` address detection (default-route guess, the tailnet/other-address list, docker/bridge/link-local filtering, the fallback ladder, the macOS branch); `deck vpn` flag parsing → the args handed to `docker compose run`; `scripts/vpn-connect` messaging for a live vs unconnected tunnel, the `--socks` "WAITING" note, and `--lockdown` fail-closed |
+| `unit/` | just `bash` | `deck listen` address detection; `deck vpn` flag parsing and config selection; `vpn-connect` messaging for a live vs down tunnel, the `--socks` note, and `--lockdown` fail-closed |
+| `integration/` | `docker` + a built image (and, for `vpn.bats`, a real config in `vpn/`) | the image's contents (the Go tools, the headless gap, the `httpx` symlink, gf's patterns, GEF, the pwn toolchain), that `nmap` execs under its file capabilities, that `NET_ADMIN` + `/dev/net/tun` reach a running container, and both firewall scripts against real iptables |
 
 `shellcheck` runs at `--severity=warning`: `deck` and `lockdown-wan` have two
-deliberate `info`-level word-splits (`$addrs`, `for host in $(...)`).
+deliberate `info`-level word-splits.
 
-### Stubs
+**Stubs** (`stubs/bin/`) are fake executables put ahead of the real ones by
+`use_stubs`; each logs its argv to `$STUB_CALLLOG` and tests assert with
+`assert_called` / `refute_called`. Behaviour is driven by env vars (`STUB_IP_ROUTE`,
+`STUB_TUN`, `STUB_LOCKDOWN_RC`, … — see each stub's header). **Fixtures**
+(`fixtures/`) are canned interface listings and **synthetic** OpenVPN configs
+(structure only, no key material). `unit/vpn_connect.bats` writes `/tmp/*.log` at
+fixed paths, so run it serially, not with `bats --jobs`.
 
-`stubs/bin/` holds fake executables put ahead of the real ones on `PATH` by
-`use_stubs`. Each appends its argv to `$STUB_CALLLOG`; tests assert with
-`assert_called` / `refute_called`. Behaviour is driven by env vars the test
-sets — `STUB_IP_ROUTE`, `STUB_IP_ADDRS`, `STUB_TUN`, `STUB_UNAME`,
-`STUB_LOCKDOWN_RC`, … (see each stub's header).
+## The stale-image trap
 
-`unit/vpn_connect.bats` writes `/tmp/openvpn.log` and `/tmp/microsocks.log` at
-the fixed paths the real script uses — run it serially, not with `bats --jobs`.
-Its `setup` clears those files and `skip`s if another user owns them, so it is
-safe on a shared box but can't run two at once.
+The scripts are `COPY`'d into the image, so a container runs whatever the last
+`./deck build` captured — not what's in `scripts/`. A green integration run
+against a stale image is the exact false pass this suite exists to prevent, and
+editing a script doesn't rebuild anything. So `tests/run.sh` checksums `scripts/`
+against the image's copies before the integration suite and **refuses to run** if
+they differ, telling you to `./deck build`. (Building automatically would be
+tidier and is a trap: the Dockerfile's `# syntax=` directive and the moving
+`kalilinux/kali-rolling` base can turn a "quick" rebuild into tens of minutes or
+an `apt` failure unrelated to your change.)
 
-### Fixtures
+## The live-tunnel layer (manual)
 
-`fixtures/ip-addrs/*` and `fixtures/ifconfig/*` are canned interface listings.
-`fixtures/ovpn/*` are **synthetic** OpenVPN configs — structure only, no real
-key material, not working configs.
-
-### A trap the integration layer has to work around
-
-The scripts are `COPY`'d into the image, so a container runs whatever
-`./deck build` last captured, not what is in `scripts/`. A green run against a
-stale image is the exact false pass this suite exists to prevent — and it is
-easy to cause, since editing a script does not rebuild anything.
-
-`tests/run.sh` therefore checksums `scripts/` against the image's copies before
-the integration suite and **refuses to run** if they differ, telling you to
-`./deck build`. One container start, about two seconds, no network.
-
-Building automatically instead would look tidier and is a trap: the Dockerfile
-carries a `# syntax=` directive that pulls a frontend from Docker Hub, and sits
-on the moving `kalilinux/kali-rolling` tag. Warm and online that is seconds;
-across a network change or a base-image bump it is tens of minutes, or an `apt`
-failure that fails the suite for reasons that have nothing to do with the code.
-
-`lockdown.bats` fakes the tunnel with `ip tuntap add dev tun0`, which is enough
-to exercise every rule `lockdown-wan` writes. What it cannot show is a live
-tunnel surviving the policy flip — see below.
-
-## The live-tunnel layer
-
-`integration/vpn.bats` is dormant until you put a working `.ovpn` in `vpn/`.
-With one there it connects for real and covers what no fixture can: the
-handshake completing, the tunnel **surviving** `lockdown-wan`'s policy flip (the
-endpoint allow-rule is what keeps OpenVPN going once the policy is `DROP`), the
-internet and the host gateway being unreachable afterwards while the tunnel
-routes remain, and the SOCKS proxy still relaying through the lockdown — what
-the established-flow rule above the gateway drop exists for.
-
-Each test connects in its own `--rm` container on a random high port, so it will
-not disturb a session you already have open, but it does put real traffic on
-your lab VPN. With several configs present, name one:
+`integration/vpn.bats` stays dormant until you put a working `.ovpn` in `vpn/`.
+With one there it connects for real and checks what no fixture can: the handshake
+completing, the tunnel **surviving** `lockdown-wan`'s policy flip, the internet
+and host gateway being unreachable afterwards while the tunnel routes remain, and
+the SOCKS proxy still relaying through the lockdown. Each test runs in its own
+`--rm` container on a random port, but it does put real traffic on your lab VPN.
 
 ```sh
-ICEPICK_VPN=htb.ovpn ./tests/run.sh integration
+ICEPICK_VPN=htb.ovpn ./tests/run.sh integration        # pick, when several
+ICEPICK_LAB_TARGET=10.129.75.4 ./tests/run.sh integration   # also prove a real relay
 ```
 
-One thing a config alone cannot show: that the proxy carries traffic to a lab
-host. Without a box running, the most the proxy test can say is that microsocks
-survived the lockdown and still completes a SOCKS handshake — curl returns 7
-when nothing is listening, 28 or 97 when the proxy answers but the target does
-not, 0 only on a real relay. Start a machine and name it to get the last one:
-
-```sh
-ICEPICK_LAB_TARGET=10.129.75.4 ./tests/run.sh integration
-```
-
-Still manual, because it needs two machines: a `./deck shell` in host-side
-`tmux` surviving an SSH disconnect.
+Without `ICEPICK_LAB_TARGET`, the proxy test can only show microsocks survived
+the lockdown and still completes a SOCKS handshake (curl exit 7 = proxy died,
+28/97 = proxy up but target silent, 0 = a real relay); point it at a running box
+to get the last one. Still manual, because it needs two machines: a `./deck
+shell` in host-side `tmux` surviving an SSH disconnect.

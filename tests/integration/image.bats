@@ -40,7 +40,7 @@ assert_on_path() {
   # (both onto the /opt/pyenv venv) are not apt packages; the Dockerfile builds
   # or wraps each. These are the exact names the autonomous overlay's probes
   # invoke, so a rename here breaks it at *its* runtime rather than at this
-  # image's build - README, "This image is another image's base".
+  # image's build - docs/internals.md, "This image is another image's base".
   assert_on_path rustscan jwt-analyzer ROPgadget angr-python
 }
 
